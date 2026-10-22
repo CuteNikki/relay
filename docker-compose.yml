@@ -8,3 +8,6 @@ services:
     env_file:
       - .env
     stop_signal: SIGINT
+    labels:
+      # dash reads whether it's live from its status file
+      dash.app: relay
