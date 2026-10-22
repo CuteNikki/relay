@@ -4,11 +4,34 @@ import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const INBOUND_KEY = Bun.env.INBOUND_STREAM_KEY;
-const TWITCH_KEY = Bun.env.TWITCH_STREAM_KEY;
-const YT_KEY = Bun.env.YOUTUBE_STREAM_KEY;
+// Each platform is streamed to only if its key is set
+const TWITCH_KEY = Bun.env.TWITCH_STREAM_KEY || undefined;
+const YT_KEY = Bun.env.YOUTUBE_STREAM_KEY || undefined;
 
-if (!INBOUND_KEY || !TWITCH_KEY || !YT_KEY) {
-  console.error('❌ Missing stream keys in .env file!');
+if (!INBOUND_KEY) {
+  console.error('❌ Set INBOUND_STREAM_KEY in .env: OBS streams with it');
+  process.exit(1);
+}
+if (!TWITCH_KEY && !YT_KEY) {
+  console.error(
+    '❌ Set YOUTUBE_STREAM_KEY, TWITCH_STREAM_KEY or both in .env: there is nowhere to send the stream',
+  );
+  process.exit(1);
+}
+
+// Twitch takes less than YouTube, so its copy is scaled down and re-encoded
+const TWITCH_RESOLUTION = Bun.env.TWITCH_RESOLUTION || '1920x1080';
+const TWITCH_BITRATE = Bun.env.TWITCH_BITRATE || '6000k';
+if (!/^d+xd+$/.test(TWITCH_RESOLUTION)) {
+  console.error(
+    `❌ TWITCH_RESOLUTION should be like 1920x1080, not ${TWITCH_RESOLUTION}`,
+  );
+  process.exit(1);
+}
+if (!/^d+k$/.test(TWITCH_BITRATE)) {
+  console.error(
+    `❌ TWITCH_BITRATE should be like 6000k, not ${TWITCH_BITRATE}`,
+  );
   process.exit(1);
 }
 
@@ -24,8 +47,6 @@ const PASS = encodeURIComponent(INBOUND_KEY);
 const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS}`;
 // Its API, which says when a stream has come in
 const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
-const TWITCH_URL = `${TWITCH_INGEST}/${TWITCH_KEY}`;
-const YT_URL = `${YT_INGEST}/${YT_KEY}`;
 
 // What the dashboard reads to show whether the stream is live
 const STATUS_FILE = Bun.env.STATUS_FILE ?? '/tmp/relay/status.json';
@@ -36,7 +57,9 @@ const WAIT_MS = 2000;
 
 // FFmpeg names its input and outputs by their full URL, keys and all, so
 // they're hidden in everything printed, since the logs are shown elsewhere
-const SECRETS = [INBOUND_KEY, PASS, TWITCH_KEY, YT_KEY];
+const SECRETS = [INBOUND_KEY, PASS, TWITCH_KEY, YT_KEY].filter(
+  (key): key is string => !!key,
+);
 function hide(text: string) {
   return SECRETS.reduce((out, key) => out.replaceAll(key, '***'), text);
 }
@@ -61,10 +84,71 @@ type Status = {
   updatedAt: number;
 };
 
-const OUTPUTS = [
-  { name: 'YouTube', sends: 'as it comes in' },
-  { name: 'Twitch', sends: '1080p at 6000 kb/s' },
-];
+/** Twitch's bitrate as people say it: "6000k" → "6000 kb/s" */
+const twitchSends = `${TWITCH_RESOLUTION.split('x')[1]}p at ${TWITCH_BITRATE.replace(/k$/, ' kb/s')}`;
+
+/**
+ * Where the stream goes, and FFmpeg's arguments for each: YouTube gets it as
+ * it comes in, copied untouched, first; Twitch a copy scaled down and
+ * re-encoded, as it takes less.
+ */
+const DESTINATIONS = [
+  YT_KEY && {
+    name: 'YouTube',
+    sends: 'as it comes in',
+    args: [
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a:0',
+      '-c:v',
+      'copy',
+      '-c:a',
+      'copy',
+      '-flvflags',
+      'no_duration_filesize',
+      '-f',
+      'flv',
+      `${YT_INGEST}/${YT_KEY}`,
+    ],
+  },
+  TWITCH_KEY && {
+    name: 'Twitch',
+    sends: twitchSends,
+    args: [
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a:0',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'superfast',
+      '-g',
+      '120',
+      '-b:v',
+      TWITCH_BITRATE,
+      '-maxrate',
+      TWITCH_BITRATE,
+      // Twice the bitrate, in the same unit
+      '-bufsize',
+      `${Number(TWITCH_BITRATE.slice(0, -1)) * 2}k`,
+      '-s',
+      TWITCH_RESOLUTION,
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-flvflags',
+      'no_duration_filesize',
+      '-f',
+      'flv',
+      `${TWITCH_INGEST}/${TWITCH_KEY}`,
+    ],
+  },
+].filter((d) => !!d);
+
+const OUTPUTS = DESTINATIONS.map(({ name, sends }) => ({ name, sends }));
 
 let status: Status = { live: false, input: {}, outputs: OUTPUTS, updatedAt: 0 };
 let lastWrite = 0;
@@ -139,54 +223,7 @@ function relay() {
     'pipe:1',
     '-i',
     INPUT_URL,
-
-    // -------------------------------------------------------------------------
-    // OUTPUT 1: YOUTUBE STREAM (Pure 1440p Passthrough Copy - FIRST)
-    // -------------------------------------------------------------------------
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a:0',
-    '-c:v',
-    'copy', // Take the raw 16000 Kbps 1440p stream...
-    '-c:a',
-    'copy', // ...and pristine audio packets directly.
-    '-flvflags',
-    'no_duration_filesize',
-    '-f',
-    'flv',
-    YT_URL, // Push straight out to YouTube first.
-
-    // -------------------------------------------------------------------------
-    // OUTPUT 2: TWITCH STREAM (Downscaled 1080p @ 6000k - SECOND)
-    // -------------------------------------------------------------------------
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a:0',
-    '-c:v',
-    'libx264', // Branch off a separate encoder instance.
-    '-preset',
-    'superfast',
-    '-g',
-    '120',
-    '-b:v',
-    '6000k',
-    '-maxrate',
-    '6000k',
-    '-bufsize',
-    '12000k',
-    '-s',
-    '1920x1080', // Compress and downscale this track alone.
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    '-flvflags',
-    'no_duration_filesize',
-    '-f',
-    'flv',
-    TWITCH_URL,
+    ...DESTINATIONS.flatMap((d) => d.args),
   ]);
 
   // What it says about the stream: the input's streams come under
