@@ -22,13 +22,13 @@ if (!TWITCH_KEY && !YT_KEY) {
 // Twitch takes less than YouTube, so its copy is scaled down and re-encoded
 const TWITCH_RESOLUTION = Bun.env.TWITCH_RESOLUTION || '1920x1080';
 const TWITCH_BITRATE = Bun.env.TWITCH_BITRATE || '6000k';
-if (!/^d+xd+$/.test(TWITCH_RESOLUTION)) {
+if (!/^\d+x\d+$/.test(TWITCH_RESOLUTION)) {
   console.error(
     `❌ TWITCH_RESOLUTION should be like 1920x1080, not ${TWITCH_RESOLUTION}`,
   );
   process.exit(1);
 }
-if (!/^d+k$/.test(TWITCH_BITRATE)) {
+if (!/^\d+k$/.test(TWITCH_BITRATE)) {
   console.error(
     `❌ TWITCH_BITRATE should be like 6000k, not ${TWITCH_BITRATE}`,
   );
