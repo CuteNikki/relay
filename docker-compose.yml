@@ -1,0 +1,10 @@
+services:
+  rtmp-relay:
+    build: .
+    container_name: rtmp-relay
+    restart: unless-stopped
+    ports:
+      - '1936:1936/tcp'
+    env_file:
+      - .env
+    stop_signal: SIGINT
