@@ -17,7 +17,13 @@ if (!INBOUND_KEY || !TWITCH_KEY || !YT_KEY) {
 const TWITCH_INGEST = Bun.env.TWITCH_INGEST ?? 'rtmp://live.twitch.tv/app';
 const YT_INGEST = Bun.env.YOUTUBE_INGEST ?? 'rtmp://a.rtmp.youtube.com/live2';
 
-const INPUT_URL = `rtmp://0.0.0.0:1936/live/${INBOUND_KEY}`;
+// MediaMTX, which OBS streams to, and which takes a stream only with
+// INBOUND_STREAM_KEY as its password; the relay reads it back from there
+const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
+const PASS = encodeURIComponent(INBOUND_KEY);
+const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS}`;
+// Its API, which says when a stream has come in
+const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
 const TWITCH_URL = `${TWITCH_INGEST}/${TWITCH_KEY}`;
 const YT_URL = `${YT_INGEST}/${YT_KEY}`;
 
@@ -25,12 +31,12 @@ const YT_URL = `${YT_INGEST}/${YT_KEY}`;
 const STATUS_FILE = Bun.env.STATUS_FILE ?? '/tmp/relay/status.json';
 // How often the status is written while live, at most
 const STATUS_EVERY_MS = 2000;
-// How long to wait before listening again after FFmpeg exits
-const RESTART_MS = 1000;
+// How often MediaMTX is asked whether a stream has come in
+const WAIT_MS = 2000;
 
 // FFmpeg names its input and outputs by their full URL, keys and all, so
 // they're hidden in everything printed, since the logs are shown elsewhere
-const SECRETS = [INBOUND_KEY, TWITCH_KEY, YT_KEY];
+const SECRETS = [INBOUND_KEY, PASS, TWITCH_KEY, YT_KEY];
 function hide(text: string) {
   return SECRETS.reduce((out, key) => out.replaceAll(key, '***'), text);
 }
@@ -97,19 +103,40 @@ function describeAudio(line: string) {
 let ffmpeg: ChildProcess | undefined;
 let stopping = false;
 
-function start() {
+/** Whether OBS is streaming to MediaMTX, by its API: until it is, there's no such path. */
+async function streamIsIn() {
+  try {
+    const res = await fetch(STREAM_API, {
+      headers: { Authorization: `Basic ${btoa(`relay:${INBOUND_KEY}`)}` },
+      signal: AbortSignal.timeout(WAIT_MS),
+    });
+    if (!res.ok) return false;
+    return ((await res.json()) as { online?: boolean }).online === true;
+  } catch {
+    // MediaMTX not up yet, as just after the stack starts
+    return false;
+  }
+}
+
+/** Waits for a stream to come in, then relays it. */
+async function start() {
   status = { live: false, input: {}, outputs: OUTPUTS, updatedAt: 0 };
   writeStatus(true);
-  log('📡 Bun Relay Listening securely on Port 1936...');
+  log('📡 Waiting for a stream on port 1936...');
+  while (!(await streamIsIn())) {
+    if (stopping) return;
+    await Bun.sleep(WAIT_MS);
+  }
+  relay();
+}
 
+function relay() {
   ffmpeg = spawn('ffmpeg', [
     // Its progress as key=value lines on stdout, for the status, in place
     // of the line it would otherwise keep rewriting in the logs
     '-nostats',
     '-progress',
     'pipe:1',
-    '-listen',
-    '1',
     '-i',
     INPUT_URL,
 
@@ -195,9 +222,9 @@ function start() {
     log(`\n❌ FFmpeg exited with code ${code}`);
     status = { live: false, input: {}, outputs: OUTPUTS, updatedAt: 0 };
     writeStatus(true);
-    // Ready for the next stream, rather than leaving Docker to restart the
+    // Waiting for the next stream, rather than leaving Docker to restart the
     // container, which it does more slowly each time it exits quickly
-    if (!stopping) setTimeout(start, RESTART_MS);
+    if (!stopping) void start();
   });
 }
 
@@ -211,4 +238,4 @@ function stop() {
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 
-start();
+void start();

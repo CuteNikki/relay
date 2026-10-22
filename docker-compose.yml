@@ -1,12 +1,28 @@
 services:
+  # Takes the stream from OBS, checking its password, on the port OBS has
+  # always streamed to
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.2
+    container_name: rtmp-server
+    restart: unless-stopped
+    ports:
+      - '1936:1935/tcp'
+    environment:
+      # Letters, digits and _ are safest: MediaMTX refuses some characters, such
+      # as /, and won't start, and in OBS's stream key + would read as a space
+      MTX_AUTHINTERNALUSERS_0_PASS: ${INBOUND_STREAM_KEY:?Set INBOUND_STREAM_KEY in .env}
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+
+  # Reads it back and sends it on to YouTube and Twitch
   rtmp-relay:
     build: .
     container_name: rtmp-relay
     restart: unless-stopped
-    ports:
-      - '1936:1936/tcp'
     env_file:
       - .env
+    depends_on:
+      - mediamtx
     stop_signal: SIGINT
     labels:
       # dash reads whether it's live from its status file

@@ -1,0 +1,43 @@
+# The RTMP server OBS streams to. It takes a stream only with the right
+# password, which FFmpeg listening by itself never checked: it took any
+# stream key. The relay reads the stream back from here and sends it on.
+
+logLevel: info
+logDestinations: [stdout]
+
+# One user, for OBS to publish as and the relay to read and ask after the
+# stream as. Its password is INBOUND_STREAM_KEY, given in docker-compose.yml
+# as MTX_AUTHINTERNALUSERS_0_PASS, so it's never in this file; the compose
+# file won't start without it. Replacing the defaults, which let anyone
+# publish and read anything.
+authMethod: internal
+authInternalUsers:
+  - user: relay
+    pass: set-by-MTX_AUTHINTERNALUSERS_0_PASS
+    ips: []
+    permissions:
+      - action: publish
+        path: live
+      - action: read
+        path: live
+      - action: api
+
+# For the relay to see when a stream comes in. Reached only on the stack's
+# own network, since only RTMP's port is published.
+api: true
+apiAddress: :9997
+
+# RTMP alone: nothing uses the others
+rtmp: true
+rtmpAddress: :1935
+rtsp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+metrics: false
+pprof: false
+playback: false
+
+paths:
+  live:

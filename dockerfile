@@ -14,8 +14,6 @@ RUN bun install --production
 
 COPY index.ts ./
 
-# Expose RTMP inbound port
-EXPOSE 1936
 
 # Run the Bun application
 CMD ["bun", "run", "index.ts"]
