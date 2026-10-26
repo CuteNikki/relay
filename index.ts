@@ -44,14 +44,14 @@ async function send(d: Destination) {
   let delay = RETRY_MIN_MS;
   while (stream.live && !stopping) {
     const started = Date.now();
-    const code = await relay(d);
+    const how = await relay(d);
     // Its input ending is the stream ending, not a failure
     if (stopping || !(await streamIsIn())) break;
     if (Date.now() - started > STABLE_MS) delay = RETRY_MIN_MS;
     d.out.state = 'retrying';
     d.out.retries++;
     log(
-      `🔁 ${d.out.name}: FFmpeg exited with code ${code}, trying again in ${delay / 1000} s`,
+      `🔁 ${d.out.name}: FFmpeg exited with ${how}, trying again in ${delay / 1000} s`,
     );
     writeStatus(true);
     await Bun.sleep(delay);

@@ -62,3 +62,6 @@ export const WAIT_MS = 2000;
 export const RETRY_MIN_MS = 2000;
 export const RETRY_MAX_MS = 30_000;
 export const STABLE_MS = 60_000;
+// How long a platform's FFmpeg can go without sending a frame before it's
+// taken as hung and stopped, to be started again
+export const STALL_MS = 15_000;

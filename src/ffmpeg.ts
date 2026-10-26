@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import { INPUT_URL } from './config';
+import { INPUT_URL, STALL_MS } from './config';
 import type { Destination } from './destinations';
 import { hide, log } from './log';
 import { stream, writeStatus } from './status';
@@ -22,7 +22,7 @@ function describeAudio(line: string) {
   return [codec, rate, layout].filter(Boolean).join(', ');
 }
 
-/** Runs one platform's FFmpeg until it exits, with the code it exits with. */
+/** Runs one platform's FFmpeg until it exits, and says how it did. */
 export function relay(d: Destination) {
   const { out } = d;
   const tag = `[${out.name}]`;
@@ -73,11 +73,15 @@ export function relay(d: Destination) {
     }
   });
 
+  // Frames sent so far, for the watchdog below to see it's still sending
+  let frames = 0;
+
   // Its progress, a block of key=value lines ending in "progress=…". The
   // first comes once it's connected to the platform and sending.
   createInterface({ input: ffmpeg.stdout! }).on('line', (line) => {
     const [key, value] = line.split('=', 2).map((s) => s.trim());
-    if (key === 'fps') out.fps = Number(value);
+    if (key === 'frame') frames = Number(value);
+    else if (key === 'fps') out.fps = Number(value);
     else if (key === 'bitrate') out.bitrate = value;
     else if (key === 'speed') out.speed = value;
     else if (key === 'drop_frames') out.droppedFrames = Number(value);
@@ -92,12 +96,29 @@ export function relay(d: Destination) {
     }
   });
 
-  return new Promise<number | null>((resolve) => {
-    ffmpeg.on('close', (code) => {
-      log(`${tag} FFmpeg exited with code ${code}`);
-      if (code && complaint) out.lastError = hide(complaint);
+  // FFmpeg can hang rather than exit when a platform goes away (8.1 sent
+  // nothing for minutes on end when Twitch's server did), so one that sends
+  // no new frame for STALL_MS, connecting or not, is stopped, and send()
+  // starts it again
+  let lastFrame = { frames: 0, at: Date.now() };
+  const watchdog = setInterval(() => {
+    if (frames > lastFrame.frames) lastFrame = { frames, at: Date.now() };
+    else if (Date.now() - lastFrame.at > STALL_MS) {
+      complaint = `Sent no frames for ${STALL_MS / 1000} s`;
+      log(`⏱️ ${out.name}: ${complaint}, stopping its FFmpeg`);
+      ffmpeg.kill('SIGKILL');
+    }
+  }, 1000);
+
+  /** How it exited, e.g. "code 1" or "signal SIGKILL" */
+  return new Promise<string>((resolve) => {
+    ffmpeg.on('close', (code, signal) => {
+      clearInterval(watchdog);
+      const how = signal ? `signal ${signal}` : `code ${code}`;
+      log(`${tag} FFmpeg exited with ${how}`);
+      if (code !== 0 && complaint) out.lastError = hide(complaint);
       d.ffmpeg = undefined;
-      resolve(code);
+      resolve(how);
     });
   });
 }
