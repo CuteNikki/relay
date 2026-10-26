@@ -17,6 +17,9 @@ const STOP_MS = 5000;
  * is, sees that every platform is being sent it.
  */
 async function watch() {
+  log.info(
+    `📤 Sends to ${DESTINATIONS.map((d) => `${d.out.name} (${d.out.sends})`).join(', ')}`,
+  );
   log.info('📡 Waiting for a stream on port 1936 (RTMP) or 8890 (SRT)...');
   while (!stopping) {
     const online = await streamIsIn();

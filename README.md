@@ -3,7 +3,7 @@
 Stream to YouTube and Twitch at once while uploading only once. OBS sends a
 single stream to your server, and the relay sends it on to both: to YouTube
 untouched, at whatever quality you stream in, and to Twitch scaled down to
-what Twitch takes.
+what Twitch takes. Other platforms, such as Kick, can be added too.
 
 It's useful when your upload can carry one high-quality stream but not two,
 or when you want YouTube to get more than Twitch allows (say 1440p at
@@ -36,9 +36,9 @@ OBS ──RTMP or SRT──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──
 
 - A server with Docker and Docker Compose, with port **1936** (TCP) reachable
   from where you stream, and **8890** (UDP) too if you stream by SRT.
-- Enough CPU there for one x264 encode at Twitch's resolution (the `superfast`
-  preset), which is all the relay encodes. Leave Twitch out and it encodes
-  nothing at all.
+- Enough CPU there for one x264 encode (the `superfast` preset) for each
+  platform that's re-encoded, as Twitch is in `.env.example`. Platforms sent
+  the stream as it comes in, as YouTube is, cost almost nothing.
 
 ## Setting it up
 
@@ -52,8 +52,9 @@ Fill in `.env`:
 
 - **`INBOUND_STREAM_KEY`**: a password you make up, which OBS streams with.
   Stick to letters, digits and `_`.
-- **`YOUTUBE_STREAM_KEY`** and/or **`TWITCH_STREAM_KEY`**: set either or
-  both. A platform without a key is left out.
+- **`OUTPUT_1_KEY`** and/or **`OUTPUT_2_KEY`**: your YouTube and Twitch
+  stream keys. A platform without a key is left out. For other platforms, see
+  [Where it sends](#where-it-sends).
 
 Then start it:
 
@@ -112,20 +113,59 @@ seconds, as YouTube asks.
 
 All in `.env`:
 
-| Setting              | Default                           | What it's for                                                                                           |
-| -------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `INBOUND_STREAM_KEY` | (required)                        | The password OBS streams with                                                                           |
-| `YOUTUBE_STREAM_KEY` | (none)                            | Sends to YouTube when set                                                                               |
-| `TWITCH_STREAM_KEY`  | (none)                            | Sends to Twitch when set                                                                                |
-| `TWITCH_RESOLUTION`  | `1920x1080`                       | What Twitch's copy is scaled to                                                                         |
-| `TWITCH_BITRATE`     | `6000k`                           | Twitch's video bitrate                                                                                  |
-| `TWITCH_INGEST`      | `rtmp://live.twitch.tv/app`       | A Twitch server nearer you, from [Twitch's list](https://help.twitch.tv/s/twitch-ingest-recommendation) |
-| `YOUTUBE_INGEST`     | `rtmp://a.rtmp.youtube.com/live2` | Another YouTube ingest address                                                                          |
-| `STATUS_FILE`        | `/tmp/relay/status.json`          | Where it writes whether it's live (see below)                                                           |
-| `LOG_LEVEL`          | `info`                            | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error`                       |
-| `SRT_PASSPHRASE`     | (none)                            | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start                            |
-| `RECORD`             | `false`                           | `true` records what comes in to `./recordings` (see below)                                              |
-| `RECORD_KEEP`        | `7d`                              | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good                         |
+| Setting              | Default                  | What it's for                                                                     |
+| -------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| `INBOUND_STREAM_KEY` | (required)               | The password OBS streams with                                                     |
+| `OUTPUT_n_…`         |                          | Where it sends (see [Where it sends](#where-it-sends))                            |
+| `STATUS_FILE`        | `/tmp/relay/status.json` | Where it writes whether it's live (see below)                                     |
+| `LOG_LEVEL`          | `info`                   | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error` |
+| `SRT_PASSPHRASE`     | (none)                   | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start      |
+| `RECORD`             | `false`                  | `true` records what comes in to `./recordings` (see below)                        |
+| `RECORD_KEEP`        | `7d`                     | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good   |
+
+## Where it sends
+
+Each platform is an output in `.env`, numbered from 1. `.env.example` starts
+you off with YouTube and Twitch:
+
+```bash
+OUTPUT_1_NAME=YouTube
+OUTPUT_1_URL=rtmp://a.rtmp.youtube.com/live2
+OUTPUT_1_KEY=…
+
+OUTPUT_2_NAME=Twitch
+OUTPUT_2_URL=rtmp://live.twitch.tv/app
+OUTPUT_2_KEY=…
+OUTPUT_2_RESOLUTION=1920x1080
+OUTPUT_2_BITRATE=6000k
+```
+
+Any other platform that takes RTMP or RTMPS, such as Kick, is another output,
+`OUTPUT_3_…`, with the address and key from its dashboard.
+
+| Setting               | What it's for                                                                    |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `OUTPUT_n_NAME`       | What it's called in the logs and the status; `Output n` if left out              |
+| `OUTPUT_n_URL`        | The server address the platform gives you, `rtmp://` or `rtmps://` (required)    |
+| `OUTPUT_n_KEY`        | Its stream key; an output without one is left out                                |
+| `OUTPUT_n_RESOLUTION` | Re-encodes it at this size, such as `1280x720`                                   |
+| `OUTPUT_n_BITRATE`    | Re-encodes it at this video bitrate, such as `4000k`; `6000k` if only a size set |
+
+Without a resolution or bitrate, an output gets the stream as it comes in,
+like YouTube above, which costs almost no CPU. With either, it gets an encode
+of its own, like Twitch, which costs one x264 encode's worth. Twitch has
+servers nearer you than its default, in
+[Twitch's list](https://help.twitch.tv/s/twitch-ingest-recommendation).
+
+Give each output its own name. Numbers needn't run on: `OUTPUT_1` and
+`OUTPUT_5` are fine. A setting the relay doesn't know, such as a misspelt
+`OUTPUT_1_BITRAT`, stops it with an error rather than being left out without a
+word.
+
+Before outputs, YouTube and Twitch had settings of their own:
+`YOUTUBE_STREAM_KEY`, `TWITCH_STREAM_KEY`, `TWITCH_RESOLUTION` and so on. The
+relay won't start with those in `.env`, and says which they are, so move them
+to outputs as above.
 
 ## Recording
 

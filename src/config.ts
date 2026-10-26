@@ -9,50 +9,124 @@ function fail(text: string): never {
 }
 
 const inboundKey = Bun.env.INBOUND_STREAM_KEY;
-// Each platform is streamed to only if its key is set
-export const TWITCH_KEY = Bun.env.TWITCH_STREAM_KEY || undefined;
-export const YT_KEY = Bun.env.YOUTUBE_STREAM_KEY || undefined;
-
 if (!inboundKey) fail('Set INBOUND_STREAM_KEY in .env: OBS streams with it');
 // Typed as a string, now it's known to be set
 export const INBOUND_KEY = inboundKey;
 
-if (!TWITCH_KEY && !YT_KEY) {
-  fail(
-    'Set YOUTUBE_STREAM_KEY, TWITCH_STREAM_KEY or both in .env: there is nowhere to send the stream',
-  );
-}
+/**
+ * Somewhere the stream goes: an RTMP or RTMPS server, the key it takes, and,
+ * if it's re-encoded rather than sent as it comes in, at what resolution and
+ * bitrate. Without a resolution, it keeps the size it comes in at.
+ */
+export type OutputSettings = {
+  name: string;
+  url: string;
+  key: string;
+  encode?: { resolution?: string; bitrate: string };
+};
 
-// Twitch takes less than YouTube, so its copy is scaled down and re-encoded
-export const TWITCH_RESOLUTION = Bun.env.TWITCH_RESOLUTION || '1920x1080';
-export const TWITCH_BITRATE = Bun.env.TWITCH_BITRATE || '6000k';
-if (!/^\d+x\d+$/.test(TWITCH_RESOLUTION)) {
-  fail(`TWITCH_RESOLUTION should be like 1920x1080, not ${TWITCH_RESOLUTION}`);
-}
-if (!/^\d+k$/.test(TWITCH_BITRATE)) {
-  fail(`TWITCH_BITRATE should be like 6000k, not ${TWITCH_BITRATE}`);
-}
+// An empty setting, as KEY= in .env, is the same as none
+const setting = (name: string) => Bun.env[name] || undefined;
 
-// Where each platform takes streams. Twitch has servers nearer the VPS than
-// its default one, and both can point somewhere else for testing.
-export const TWITCH_INGEST =
-  Bun.env.TWITCH_INGEST ?? 'rtmp://live.twitch.tv/app';
-export const YT_INGEST =
-  Bun.env.YOUTUBE_INGEST ?? 'rtmp://a.rtmp.youtube.com/live2';
-for (const [name, url] of [
-  ['TWITCH_INGEST', TWITCH_INGEST],
-  ['YOUTUBE_INGEST', YT_INGEST],
-] as const) {
+function ingest(name: string, url: string) {
   if (!/^rtmps?:\/\/[^/]+/.test(url)) {
     fail(`${name} should be an rtmp:// or rtmps:// address, not ${url}`);
   }
+  return url.replace(/\/+$/, '');
 }
+function resolution(name: string, value?: string) {
+  if (value && !/^\d+x\d+$/.test(value)) {
+    fail(`${name} should be like 1920x1080, not ${value}`);
+  }
+  return value;
+}
+function bitrate(name: string, value?: string) {
+  if (value && !/^\d+k$/.test(value)) {
+    fail(`${name} should be like 6000k, not ${value}`);
+  }
+  return value;
+}
+
+// YouTube and Twitch had settings of their own before they were outputs
+// like any other. An .env from then would otherwise only say there's
+// nowhere to send the stream, without saying why.
+const OLD = [
+  'YOUTUBE_STREAM_KEY',
+  'YOUTUBE_INGEST',
+  'TWITCH_STREAM_KEY',
+  'TWITCH_INGEST',
+  'TWITCH_RESOLUTION',
+  'TWITCH_BITRATE',
+].filter((name) => setting(name));
+if (OLD.length) {
+  fail(
+    `${OLD.join(', ')} ${OLD.length > 1 ? 'are' : 'is'} no longer used: YouTube and Twitch are outputs like any other now, as OUTPUT_1_URL, OUTPUT_1_KEY and so on. See "Where it sends" in the README, and .env.example`,
+  );
+}
+
+const outputs: OutputSettings[] = [];
+
+// Where it sends, as OUTPUT_1_URL, OUTPUT_1_KEY and so on, numbered however
+// suits, in the order of their numbers
+const PARTS = ['NAME', 'URL', 'KEY', 'RESOLUTION', 'BITRATE'];
+const numbers = new Set<number>();
+for (const name of Object.keys(Bun.env)) {
+  const [, n, part] = name.match(/^OUTPUT_(\d+)_(.+)$/) ?? [];
+  if (!n || !part) continue;
+  // A misspelt part would otherwise be left out without a word
+  if (!PARTS.includes(part)) {
+    fail(`${name} isn't a setting: an output has ${PARTS.join(', ')}`);
+  }
+  numbers.add(Number(n));
+}
+for (const n of [...numbers].sort((a, b) => a - b)) {
+  const part = (name: string) => setting(`OUTPUT_${n}_${name}`);
+  const url = part('URL');
+  if (!url) {
+    if (PARTS.some(part)) {
+      fail(`Set OUTPUT_${n}_URL in .env: it says where output ${n} goes`);
+    }
+    continue;
+  }
+  const name = part('NAME') ?? `Output ${n}`;
+  const address = ingest(`OUTPUT_${n}_URL`, url);
+  const size = resolution(`OUTPUT_${n}_RESOLUTION`, part('RESOLUTION'));
+  const rate = bitrate(`OUTPUT_${n}_BITRATE`, part('BITRATE'));
+  // Left out until it has a key, as a platform in .env.example is that's
+  // not been filled in
+  const key = part('KEY');
+  if (!key) {
+    log.info(`⏭️ ${name} has no OUTPUT_${n}_KEY, so it's left out`);
+    continue;
+  }
+  outputs.push({
+    name,
+    url: address,
+    key,
+    // Re-encoded if either is set, at 6000 kb/s unless said
+    encode:
+      size || rate ? { resolution: size, bitrate: rate ?? '6000k' } : undefined,
+  });
+}
+
+if (!outputs.length) {
+  fail(
+    "Set at least one output's address and key in .env, as OUTPUT_1_URL and OUTPUT_1_KEY: there is nowhere to send the stream",
+  );
+}
+// Each is known by its name, in the logs and the status
+for (const { name } of outputs) {
+  if (outputs.filter((o) => o.name === name).length > 1) {
+    fail(`Two outputs are named ${name}: give each its own OUTPUT_n_NAME`);
+  }
+}
+export const OUTPUTS = outputs;
 
 // MediaMTX, which OBS streams to, and which takes a stream only with
 // INBOUND_STREAM_KEY as its password; the relay reads it back from there
 const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
 export const PASS = encodeURIComponent(INBOUND_KEY);
-hideInLogs(INBOUND_KEY, PASS, TWITCH_KEY, YT_KEY);
+hideInLogs(INBOUND_KEY, PASS, ...OUTPUTS.map((o) => o.key));
 export const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS}`;
 // Its API, which says when a stream has come in
 export const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
