@@ -27,13 +27,15 @@ authInternalUsers:
 api: true
 apiAddress: :9997
 
-# RTMP alone: nothing uses the others
+# OBS streams by RTMP, or by SRT, which copes better with a connection that
+# drops packets; nothing uses the others
 rtmp: true
 rtmpAddress: :1935
+srt: true
+srtAddress: :8890
 rtsp: false
 hls: false
 webrtc: false
-srt: false
 moq: false
 metrics: false
 pprof: false
@@ -55,3 +57,7 @@ paths:
     recordPartDuration: 1s
     # Deleted after RECORD_KEEP, 0s to keep them for good
     recordDeleteAfter: 7d
+    # What encrypts the stream from OBS by SRT, if SRT_PASSPHRASE is set in
+    # .env, given as MTX_PATHS_LIVE_SRTPUBLISHPASSPHRASE; RTMP isn't
+    # encrypted either way
+    srtPublishPassphrase:

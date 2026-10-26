@@ -17,7 +17,7 @@ const STOP_MS = 5000;
  * is, sees that every platform is being sent it.
  */
 async function watch() {
-  log.info('📡 Waiting for a stream on port 1936...');
+  log.info('📡 Waiting for a stream on port 1936 (RTMP) or 8890 (SRT)...');
   while (!stopping) {
     const online = await streamIsIn();
     if (online && !stream.live) {
@@ -28,7 +28,9 @@ async function watch() {
       stream.live = false;
       stream.since = undefined;
       stream.input = {};
-      log.info('📡 The stream ended. Waiting for the next one on port 1936...');
+      log.info(
+        '📡 The stream ended. Waiting for the next one on port 1936 (RTMP) or 8890 (SRT)...',
+      );
     }
     // Every time, not only when it came in, so a platform whose FFmpeg gave
     // up as the stream went and came back quickly is started again

@@ -12,8 +12,8 @@ or when you want YouTube to get more than Twitch allows (say 1440p at
 ## How it works
 
 ```
-OBS ──RTMP──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──▶ YouTube   copied as it comes in
-              port 1936                     └──▶ Twitch    scaled and re-encoded
+OBS ──RTMP or SRT──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──▶ YouTube   copied as it comes in
+               1936 / 8890 (UDP)                   └──▶ Twitch    scaled and re-encoded
 ```
 
 - **[MediaMTX](https://github.com/bluenviron/mediamtx)** takes the stream from
@@ -34,8 +34,8 @@ OBS ──RTMP──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──▶ You
 
 ## What you need
 
-- A server with Docker and Docker Compose, with port **1936** reachable from
-  where you stream.
+- A server with Docker and Docker Compose, with port **1936** (TCP) reachable
+  from where you stream, and **8890** (UDP) too if you stream by SRT.
 - Enough CPU there for one x264 encode at Twitch's resolution (the `superfast`
   preset), which is all the relay encodes. Leave Twitch out and it encodes
   nothing at all.
@@ -63,6 +63,15 @@ docker compose up -d --build
 
 ## Setting up OBS
 
+OBS can stream to the relay by RTMP or by SRT. RTMP is the usual way. SRT
+copes better with a connection that drops packets, as over Wi-Fi or mobile
+data or far from the server: it sends again only what went missing, within a
+buffer of a second or two, where RTMP slows the whole stream down to catch up,
+and OBS drops frames. It also needs port 8890 open for UDP, which some
+networks block.
+
+### By RTMP
+
 In **Settings → Stream**:
 
 | Setting    | Value                                                 |
@@ -73,6 +82,27 @@ In **Settings → Stream**:
 
 For example, with `INBOUND_STREAM_KEY=hunter2` the stream key is
 `live?user=relay&pass=hunter2`.
+
+### By SRT
+
+In **Settings → Stream**, choose **Custom…**, leave the stream key empty, and
+put all of this in **Server**, with your `INBOUND_STREAM_KEY` after
+`relay:`:
+
+```
+srt://your-server:8890?streamid=publish:live:relay:hunter2&latency=2000000&pkt_size=1316
+```
+
+`latency` is the buffer, in microseconds: `2000000` is 2 seconds. A steady
+connection can do with less, a shaky one may need more; about four times your
+ping to the server is a fair start. The platforms' own delay is longer anyway.
+
+To have it encrypted on the way to your server, set `SRT_PASSPHRASE` in
+`.env` and add `&passphrase=` and the same passphrase to the end of the
+address. With a passphrase set, OBS can't stream by SRT without it, while
+RTMP is never encrypted.
+
+### Either way
 
 In **Settings → Output**, stream at the quality you want YouTube to get, since
 YouTube receives exactly what OBS sends. Set the keyframe interval to 2
@@ -93,6 +123,7 @@ All in `.env`:
 | `YOUTUBE_INGEST`     | `rtmp://a.rtmp.youtube.com/live2` | Another YouTube ingest address                                                                          |
 | `STATUS_FILE`        | `/tmp/relay/status.json`          | Where it writes whether it's live (see below)                                                           |
 | `LOG_LEVEL`          | `info`                            | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error`                       |
+| `SRT_PASSPHRASE`     | (none)                            | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start                            |
 | `RECORD`             | `false`                           | `true` records what comes in to `./recordings` (see below)                                              |
 | `RECORD_KEEP`        | `7d`                              | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good                         |
 
