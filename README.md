@@ -73,7 +73,7 @@ networks block.
 
 ### By RTMP
 
-In **Settings → Stream**:
+In **Settings > Stream**:
 
 | Setting    | Value                                                 |
 | ---------- | ----------------------------------------------------- |
@@ -86,7 +86,7 @@ For example, with `INBOUND_STREAM_KEY=hunter2` the stream key is
 
 ### By SRT
 
-In **Settings → Stream**, choose **Custom…**, leave the stream key empty, and
+In **Settings > Stream**, choose **Custom…**, leave the stream key empty, and
 put all of this in **Server**, with your `INBOUND_STREAM_KEY` after
 `relay:`:
 
@@ -105,7 +105,7 @@ RTMP is never encrypted.
 
 ### Either way
 
-In **Settings → Output**, stream at the quality you want YouTube to get, since
+In **Settings > Output**, stream at the quality you want YouTube to get, since
 YouTube receives exactly what OBS sends. Set the keyframe interval to 2
 seconds, as YouTube asks.
 

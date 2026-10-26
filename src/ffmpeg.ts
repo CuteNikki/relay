@@ -16,7 +16,7 @@ const FFMPEG_LEVELS: Record<string, Level> = {
   warning: 'info',
 };
 
-/** "Stream #0:0: Video: h264 (High), yuv420p(…), 2560x1440 [SAR 1:1 DAR 16:9], 16000 kb/s, 60 fps, …" → "h264, 2560x1440, 60 fps" */
+/** "Stream #0:0: Video: h264 (High), yuv420p(…), 2560x1440 [SAR 1:1 DAR 16:9], 16000 kb/s, 60 fps, …" > "h264, 2560x1440, 60 fps" */
 function describeVideo(line: string) {
   const codec = line.match(/Video: (\w+)/)?.[1];
   const size = line.match(/\b(\d{2,5}x\d{2,5})\b/)?.[1];
@@ -24,7 +24,7 @@ function describeVideo(line: string) {
   return [codec, size, fps && `${fps} fps`].filter(Boolean).join(', ');
 }
 
-/** "Stream #0:1: Audio: aac (LC), 48000 Hz, stereo, fltp, 160 kb/s" → "aac, 48000 Hz, stereo" */
+/** "Stream #0:1: Audio: aac (LC), 48000 Hz, stereo, fltp, 160 kb/s" > "aac, 48000 Hz, stereo" */
 function describeAudio(line: string) {
   const codec = line.match(/Audio: (\w+)/)?.[1];
   const rate = line.match(/(\d+ Hz)/)?.[1];
