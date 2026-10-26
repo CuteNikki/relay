@@ -1,0 +1,103 @@
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+
+import { INPUT_URL } from './config';
+import type { Destination } from './destinations';
+import { hide, log } from './log';
+import { stream, writeStatus } from './status';
+
+/** "Stream #0:0: Video: h264 (High), yuv420p(…), 2560x1440 [SAR 1:1 DAR 16:9], 16000 kb/s, 60 fps, …" → "h264, 2560x1440, 60 fps" */
+function describeVideo(line: string) {
+  const codec = line.match(/Video: (\w+)/)?.[1];
+  const size = line.match(/\b(\d{2,5}x\d{2,5})\b/)?.[1];
+  const fps = line.match(/([\d.]+) fps/)?.[1];
+  return [codec, size, fps && `${fps} fps`].filter(Boolean).join(', ');
+}
+
+/** "Stream #0:1: Audio: aac (LC), 48000 Hz, stereo, fltp, 160 kb/s" → "aac, 48000 Hz, stereo" */
+function describeAudio(line: string) {
+  const codec = line.match(/Audio: (\w+)/)?.[1];
+  const rate = line.match(/(\d+ Hz)/)?.[1];
+  const layout = line.match(/Hz, ([\w.()]+)/)?.[1];
+  return [codec, rate, layout].filter(Boolean).join(', ');
+}
+
+/** Runs one platform's FFmpeg until it exits, with the code it exits with. */
+export function relay(d: Destination) {
+  const { out } = d;
+  const tag = `[${out.name}]`;
+  Object.assign(out, {
+    state: 'connecting',
+    since: undefined,
+    fps: undefined,
+    bitrate: undefined,
+    speed: undefined,
+    droppedFrames: undefined,
+  });
+  writeStatus(true);
+
+  const ffmpeg = spawn('ffmpeg', [
+    // Its progress as key=value lines on stdout, for the status, in place
+    // of the line it would otherwise keep rewriting in the logs
+    '-nostats',
+    '-progress',
+    'pipe:1',
+    '-i',
+    INPUT_URL,
+    ...d.args,
+  ]);
+  d.ffmpeg = ffmpeg;
+
+  // What it says about the stream: the input's streams come under
+  // "Input #0", the outputs' under "Output #…"
+  let section: 'input' | 'output' | undefined;
+  // The last thing it complained of, for the status should it fail.
+  // "Conversion failed!" is how it always ends, so says nothing.
+  let complaint: string | undefined;
+  createInterface({ input: ffmpeg.stderr! }).on('line', (line) => {
+    log(`${tag} ${line}`);
+    if (/^Input #0/.test(line)) {
+      section = 'input';
+    } else if (/^Output #/.test(line)) {
+      section = 'output';
+    } else if (section === 'input' && /Stream #.*: Video:/.test(line)) {
+      stream.input.video = describeVideo(line);
+    } else if (section === 'input' && /Stream #.*: Audio:/.test(line)) {
+      stream.input.audio = describeAudio(line);
+    }
+    if (
+      /error|fail|refused|denied|timed out|invalid|broken pipe/i.test(line) &&
+      !/^Conversion failed!$/.test(line.trim())
+    ) {
+      complaint = line.trim();
+    }
+  });
+
+  // Its progress, a block of key=value lines ending in "progress=…". The
+  // first comes once it's connected to the platform and sending.
+  createInterface({ input: ffmpeg.stdout! }).on('line', (line) => {
+    const [key, value] = line.split('=', 2).map((s) => s.trim());
+    if (key === 'fps') out.fps = Number(value);
+    else if (key === 'bitrate') out.bitrate = value;
+    else if (key === 'speed') out.speed = value;
+    else if (key === 'drop_frames') out.droppedFrames = Number(value);
+    else if (key === 'progress') {
+      if (out.state === 'connecting') {
+        out.state = 'live';
+        out.since = Date.now();
+        delete out.lastError;
+        log(`✅ ${out.name}: sending`);
+        writeStatus(true);
+      } else writeStatus();
+    }
+  });
+
+  return new Promise<number | null>((resolve) => {
+    ffmpeg.on('close', (code) => {
+      log(`${tag} FFmpeg exited with code ${code}`);
+      if (code && complaint) out.lastError = hide(complaint);
+      d.ffmpeg = undefined;
+      resolve(code);
+    });
+  });
+}

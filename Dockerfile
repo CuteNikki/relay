@@ -10,5 +10,6 @@ COPY package.json bun.lock ./
 RUN bun install --production --frozen-lockfile
 
 COPY index.ts ./
+COPY src ./src
 
 CMD ["bun", "run", "index.ts"]
