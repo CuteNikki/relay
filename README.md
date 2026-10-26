@@ -135,7 +135,9 @@ stream is coming in, what it is, and how the relay is keeping up:
 
 Each output's `state` is `waiting` (no stream), `connecting`, `live` or
 `retrying` (it failed and will try again). `retries` counts its restarts
-during this stream, and `lastError` is what FFmpeg last complained of. The
+during this stream, and `lastError` is what FFmpeg last complained of. Its
+`fps`, `bitrate` and `speed` cover the last couple of seconds, not the whole
+time since it started, so a drop shows straight away. The
 `fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
 that are live: bitrates and dropped frames added up, frame rate and speed
 from the slowest. A `speed` below `1x` means it's falling behind. A dashboard can read the file

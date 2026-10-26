@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import { INPUT_URL, STALL_MS } from './config';
+import { INPUT_URL, STALL_MS, STATUS_EVERY_MS } from './config';
 import type { Destination } from './destinations';
 import { hide, log } from './log';
 import { stream, writeStatus } from './status';
@@ -73,19 +73,42 @@ export function relay(d: Destination) {
     }
   });
 
-  // Frames sent so far, for the watchdog below to see it's still sending
+  // FFmpeg's own fps, bitrate and speed are averages since it started, which
+  // hide a drop an hour in, so they're worked out here instead, from what
+  // was sent since the last sample, taken every couple of seconds: frames,
+  // bytes, and how far into the stream it got
   let frames = 0;
+  let bytes = 0;
+  let outTimeUs = 0;
+  let sample:
+    | { frames: number; bytes: number; outTimeUs: number; at: number }
+    | undefined;
 
   // Its progress, a block of key=value lines ending in "progress=…". The
-  // first comes once it's connected to the platform and sending.
+  // first comes once it's connected to the platform and sending. Before
+  // then, sizes and times can be N/A, which are kept as they were.
+  const number = (value = '', was: number) =>
+    Number.isFinite(Number(value)) ? Number(value) : was;
   createInterface({ input: ffmpeg.stdout! }).on('line', (line) => {
     const [key, value] = line.split('=', 2).map((s) => s.trim());
-    if (key === 'frame') frames = Number(value);
-    else if (key === 'fps') out.fps = Number(value);
-    else if (key === 'bitrate') out.bitrate = value;
-    else if (key === 'speed') out.speed = value;
+    if (key === 'frame') frames = number(value, frames);
+    else if (key === 'total_size') bytes = number(value, bytes);
+    else if (key === 'out_time_us') outTimeUs = number(value, outTimeUs);
     else if (key === 'drop_frames') out.droppedFrames = Number(value);
     else if (key === 'progress') {
+      const now = { frames, bytes, outTimeUs, at: Date.now() };
+      if (!sample) sample = now;
+      else if (now.at - sample.at >= STATUS_EVERY_MS) {
+        const seconds = (now.at - sample.at) / 1000;
+        const round = (n: number) => Math.round(n * 100) / 100;
+        out.fps = round((now.frames - sample.frames) / seconds);
+        // As FFmpeg puts them, e.g. "6000.5kbits/s" and "1x"
+        const kbits = ((now.bytes - sample.bytes) * 8) / 1000 / seconds;
+        out.bitrate = `${kbits.toFixed(1)}kbits/s`;
+        const streamed = (now.outTimeUs - sample.outTimeUs) / 1e6;
+        out.speed = `${round(streamed / seconds)}x`;
+        sample = now;
+      }
       if (out.state === 'connecting') {
         out.state = 'live';
         out.since = Date.now();
