@@ -2,7 +2,7 @@ services:
   # Takes the stream from OBS, checking its password, on the port OBS has
   # always streamed to
   mediamtx:
-    image: bluenviron/mediamtx:1.21.2
+    image: bluenviron/mediamtx:1.21.3
     container_name: rtmp-server
     restart: unless-stopped
     ports:
