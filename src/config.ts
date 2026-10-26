@@ -16,13 +16,14 @@ export const INBOUND_KEY = inboundKey;
 /**
  * Somewhere the stream goes: an RTMP or RTMPS server, the key it takes, and,
  * if it's re-encoded rather than sent as it comes in, at what resolution and
- * bitrate. Without a resolution, it keeps the size it comes in at.
+ * bitrate, and with which of x264's presets. Without a resolution, it keeps
+ * the size it comes in at.
  */
 export type OutputSettings = {
   name: string;
   url: string;
   key: string;
-  encode?: { resolution?: string; bitrate: string };
+  encode?: { resolution?: string; bitrate: string; preset: string };
 };
 
 // An empty setting, as KEY= in .env, is the same as none
@@ -43,6 +44,25 @@ function resolution(name: string, value?: string) {
 function bitrate(name: string, value?: string) {
   if (value && !/^\d+k$/.test(value)) {
     fail(`${name} should be like 6000k, not ${value}`);
+  }
+  return value;
+}
+// x264's presets, from least CPU and worst picture for the bitrate to most
+// and best. superfast, the default, is light; veryfast is what OBS uses
+export const PRESETS = [
+  'ultrafast',
+  'superfast',
+  'veryfast',
+  'faster',
+  'fast',
+  'medium',
+  'slow',
+  'slower',
+  'veryslow',
+];
+function preset(name: string, value?: string) {
+  if (value && !PRESETS.includes(value)) {
+    fail(`${name} should be one of ${PRESETS.join(', ')}, not ${value}`);
   }
   return value;
 }
@@ -68,7 +88,7 @@ const outputs: OutputSettings[] = [];
 
 // Where it sends, as OUTPUT_1_URL, OUTPUT_1_KEY and so on, numbered however
 // suits, in the order of their numbers
-const PARTS = ['NAME', 'URL', 'KEY', 'RESOLUTION', 'BITRATE'];
+const PARTS = ['NAME', 'URL', 'KEY', 'RESOLUTION', 'BITRATE', 'PRESET'];
 const numbers = new Set<number>();
 for (const name of Object.keys(Bun.env)) {
   const [, n, part] = name.match(/^OUTPUT_(\d+)_(.+)$/) ?? [];
@@ -92,6 +112,7 @@ for (const n of [...numbers].sort((a, b) => a - b)) {
   const address = ingest(`OUTPUT_${n}_URL`, url);
   const size = resolution(`OUTPUT_${n}_RESOLUTION`, part('RESOLUTION'));
   const rate = bitrate(`OUTPUT_${n}_BITRATE`, part('BITRATE'));
+  const speed = preset(`OUTPUT_${n}_PRESET`, part('PRESET'));
   // Left out until it has a key, as a platform in .env.example is that's
   // not been filled in
   const key = part('KEY');
@@ -103,9 +124,15 @@ for (const n of [...numbers].sort((a, b) => a - b)) {
     name,
     url: address,
     key,
-    // Re-encoded if either is set, at 6000 kb/s unless said
+    // Re-encoded if any of them is set, at 6000 kb/s and superfast unless said
     encode:
-      size || rate ? { resolution: size, bitrate: rate ?? '6000k' } : undefined,
+      size || rate || speed
+        ? {
+            resolution: size,
+            bitrate: rate ?? '6000k',
+            preset: speed ?? 'superfast',
+          }
+        : undefined,
   });
 }
 
@@ -132,7 +159,7 @@ export const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS
 export const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
 
 // What the dashboard reads to show whether the stream is live
-export const STATUS_FILE = Bun.env.STATUS_FILE ?? '/tmp/relay/status.json';
+export const STATUS_FILE = setting('STATUS_FILE') ?? '/tmp/relay/status.json';
 // How often the status is written while live, at most
 export const STATUS_EVERY_MS = 2000;
 // How often MediaMTX is asked whether a stream has come in

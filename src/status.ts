@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { STATUS_EVERY_MS, STATUS_FILE } from './config';
 import { DESTINATIONS } from './destinations';
 import { log } from './log';
+import { mediamtxProblem } from './mediamtx';
 
 /** How one platform is doing, each sent to by its own FFmpeg */
 export type Output = {
@@ -46,6 +47,11 @@ export type Status = {
   /** All of them together */
   droppedFrames?: number;
   outputs: Output[];
+  /**
+   * What's wrong with the relay as a whole, as MediaMTX turning its password
+   * away; a platform failing is in its output instead
+   */
+  problems: string[];
   /** When this was written, so a reader can tell a live one is current */
   updatedAt: number;
 };
@@ -70,6 +76,7 @@ export function writeStatus(force = false) {
     ...stream,
     ...together(outputs.filter((o) => o.state === 'live')),
     outputs,
+    problems: [mediamtxProblem()].filter((p): p is string => !!p),
     updatedAt: now,
   };
   try {

@@ -15,8 +15,14 @@ let problem: string | undefined;
 let unreachableSince: number | undefined;
 
 function trouble(level: 'warn' | 'error', text: string) {
-  if (problem !== text) log[level](text);
+  if (problem !== text)
+    log[level](`${level === 'error' ? '❌' : '⚠️'} ${text}`);
   problem = text;
+}
+
+/** What's wrong with MediaMTX, if anything, for the status and the health check. */
+export function mediamtxProblem() {
+  return problem;
 }
 
 function fine() {
@@ -36,7 +42,7 @@ export async function streamIsIn() {
   } catch (error) {
     unreachableSince ??= Date.now();
     if (Date.now() - unreachableSince >= UNREACHABLE_MS) {
-      trouble('warn', `⚠️ MediaMTX isn't answering at ${STREAM_API}: ${error}`);
+      trouble('warn', `MediaMTX isn't answering at ${STREAM_API}: ${error}`);
     }
     return false;
   }
@@ -50,12 +56,12 @@ export async function streamIsIn() {
   if (res.status === 401 || res.status === 403) {
     trouble(
       'error',
-      `❌ MediaMTX turned the relay's password away (HTTP ${res.status}): it and the relay should both be started with the same INBOUND_STREAM_KEY, so after changing it in .env, restart both`,
+      `MediaMTX turned the relay's password away (HTTP ${res.status}): it and the relay should both be started with the same INBOUND_STREAM_KEY, so after changing it in .env, restart both`,
     );
     return false;
   }
   if (!res.ok) {
-    trouble('warn', `⚠️ MediaMTX answered HTTP ${res.status} at ${STREAM_API}`);
+    trouble('warn', `MediaMTX answered HTTP ${res.status} at ${STREAM_API}`);
     return false;
   }
   try {
@@ -65,7 +71,7 @@ export async function streamIsIn() {
   } catch (error) {
     trouble(
       'warn',
-      `⚠️ MediaMTX answered with something other than JSON: ${error}`,
+      `MediaMTX answered with something other than JSON: ${error}`,
     );
     return false;
   }

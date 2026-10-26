@@ -150,12 +150,20 @@ Any other platform that takes RTMP or RTMPS, such as Kick, is another output,
 | `OUTPUT_n_KEY`        | Its stream key; an output without one is left out                                |
 | `OUTPUT_n_RESOLUTION` | Re-encodes it at this size, such as `1280x720`                                   |
 | `OUTPUT_n_BITRATE`    | Re-encodes it at this video bitrate, such as `4000k`; `6000k` if only a size set |
+| `OUTPUT_n_PRESET`     | Re-encodes it with this x264 preset, `superfast` unless set (see below)          |
 
-Without a resolution or bitrate, an output gets the stream as it comes in,
-like YouTube above, which costs almost no CPU. With either, it gets an encode
-of its own, like Twitch, which costs one x264 encode's worth. Twitch has
-servers nearer you than its default, in
+Without a resolution, bitrate or preset, an output gets the stream as it
+comes in, like YouTube above, which costs almost no CPU. With any of them, it
+gets an encode of its own, like Twitch, which costs one x264 encode's worth.
+Twitch has servers nearer you than its default, in
 [Twitch's list](https://help.twitch.tv/s/twitch-ingest-recommendation).
+
+The preset trades CPU for picture: from `ultrafast`, `superfast`, `veryfast`,
+`faster`, `fast` and `medium` to `slow`, `slower` and `veryslow`, each takes
+more CPU than the one before and looks better at the same bitrate.
+`superfast` is light; `veryfast`, what OBS uses, looks better for about twice
+the CPU. If an output's `speed` in the status falls below `1x` while
+streaming, its preset is too slow for the server.
 
 Give each output its own name. Numbers needn't run on: `OUTPUT_1` and
 `OUTPUT_5` are fine. A setting the relay doesn't know, such as a misspelt
@@ -217,24 +225,34 @@ stream is coming in, what it is, and how the relay is keeping up:
       "sends": "1080p at 6000 kb/s",
       "state": "retrying",
       "retries": 2,
-      "lastError": "Error opening output files: I/O error"
+      "lastError": "RTMP_Connect0, failed to connect socket. 111 (Connection refused)"
     }
   ],
+  "problems": [],
   "updatedAt": 1792700002000
 }
 ```
 
 Each output's `state` is `waiting` (no stream), `connecting`, `live` or
 `retrying` (it failed and will try again). `retries` counts its restarts
-during this stream, and `lastError` is what FFmpeg last complained of. Its
-`fps`, `bitrate` and `speed` cover the last couple of seconds, not the whole
-time since it started, so a drop shows straight away. The
-`fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
-that are live: bitrates and dropped frames added up, frame rate and speed
-from the slowest. A `speed` below `1x` means it's falling behind. A dashboard can read the file
-with `docker exec rtmp-relay cat /tmp/relay/status.json`. The compose file
-labels the container `dash.app: relay` for
-[dash](https://github.com/CuteNikki/dash), which shows this on its tile.
+during this stream, and `lastError` is why it last failed. Its `fps`,
+`bitrate` and `speed` cover the last couple of seconds, not the whole time
+since it started, so a drop shows straight away.
+
+The `fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
+that are live: bitrates and dropped frames added up, frame rate and speed from
+the slowest. A `speed` below `1x` means it's falling behind. `problems` lists
+what's wrong with the relay as a whole, such as MediaMTX turning its password
+away; a platform failing shows in its output instead.
+
+A dashboard can read the file with
+`docker exec rtmp-relay cat /tmp/relay/status.json`. The compose file labels
+the container `dash.app: relay` for [dash](https://github.com/CuteNikki/dash),
+which shows this on its tile.
+
+Docker checks the relay's health from the same file: `docker ps` shows it as
+`unhealthy` if the file stops being written, which means the relay has hung,
+or if `problems` isn't empty. `docker inspect rtmp-relay` says why.
 
 To follow along as it streams:
 

@@ -15,4 +15,9 @@ RUN bun install --production --frozen-lockfile
 COPY index.ts ./
 COPY src ./src
 
+# Healthy while the relay keeps its status current and nothing's wrong with
+# it as a whole, such as MediaMTX turning its password away: src/health.ts
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=2 \
+  CMD ["bun", "src/health.ts"]
+
 CMD ["bun", "run", "index.ts"]

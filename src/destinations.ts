@@ -3,18 +3,24 @@ import type { ChildProcess } from 'node:child_process';
 import { OUTPUTS, type OutputSettings } from './config';
 import type { Output } from './status';
 
-/** What it gets, as people say it: "as it comes in", "1080p at 6000 kb/s" or "at 6000 kb/s" */
+/**
+ * What it gets, as people say it: "as it comes in", "1080p at 6000 kb/s" or
+ * "at 6000 kb/s", and the preset if it's not the usual superfast, as
+ * "1080p at 6000 kb/s, veryfast"
+ */
 function describe({ encode }: OutputSettings) {
   if (!encode) return 'as it comes in';
   const rate = encode.bitrate.replace(/k$/, ' kb/s');
-  return encode.resolution
+  const what = encode.resolution
     ? `${encode.resolution.split('x')[1]}p at ${rate}`
     : `at ${rate}`;
+  return encode.preset === 'superfast' ? what : `${what}, ${encode.preset}`;
 }
 
 /**
  * FFmpeg's arguments to send the stream to one output: copied untouched,
- * which costs almost no CPU, or re-encoded at its resolution and bitrate.
+ * which costs almost no CPU, or re-encoded at its resolution and bitrate,
+ * with its preset.
  */
 function args({ url, key, encode }: OutputSettings) {
   const as = encode
@@ -22,7 +28,7 @@ function args({ url, key, encode }: OutputSettings) {
         '-c:v',
         'libx264',
         '-preset',
-        'superfast',
+        encode.preset,
         // A keyframe every 2 seconds, as Twitch and most others ask,
         // whatever the frame rate: a fixed -g 120 was 2 s at 60 fps but 4 s
         // at 30. Scene cuts add none of their own, so they stay evenly
