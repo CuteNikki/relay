@@ -93,6 +93,25 @@ All in `.env`:
 | `YOUTUBE_INGEST`     | `rtmp://a.rtmp.youtube.com/live2` | Another YouTube ingest address                                                                          |
 | `STATUS_FILE`        | `/tmp/relay/status.json`          | Where it writes whether it's live (see below)                                                           |
 | `LOG_LEVEL`          | `info`                            | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error`                       |
+| `RECORD`             | `false`                           | `true` records what comes in to `./recordings` (see below)                                              |
+| `RECORD_KEEP`        | `7d`                              | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good                         |
+
+## Recording
+
+With `RECORD=true` in `.env`, MediaMTX keeps a copy of what OBS sends, at full
+quality, in `recordings/live/` next to the compose file. It's a file an hour,
+named for when it started in UTC, such as `2026-10-26_13-55-24Z.mp4`. It's
+written a second at a time, so if the server goes down, only the last second
+is lost. That way you have the stream even if a platform's copy fails.
+
+Recordings take room: a 16 Mb/s stream is about 7 GB an hour. MediaMTX
+deletes them after `RECORD_KEEP`, 7 days unless you set it. It doesn't watch
+how full the disk is, so set it to what your disk can hold.
+
+MediaMTX runs as root in its container, so the files belong to root. To delete
+them yourself, use `sudo rm`.
+
+After changing `RECORD` or `RECORD_KEEP`, run `docker compose up -d` again.
 
 ## Is it live?
 

@@ -1,0 +1,7 @@
+# Only package.json, bun.lock, index.ts and src/ go into the image, so the
+# rest needn't be sent to Docker each build: least of all the recordings,
+# which run to gigabytes, or .env, with the stream keys
+recordings
+node_modules
+.env
+.git

@@ -41,3 +41,17 @@ playback: false
 
 paths:
   live:
+    # Recording what comes in, to ./recordings on the server, if RECORD=true
+    # in .env; docker-compose.yml gives these from .env as
+    # MTX_PATHS_LIVE_RECORD and MTX_PATHS_LIVE_RECORDDELETEAFTER
+    record: false
+    # A file an hour, named for when it starts, in UTC, in recordings/live/:
+    # MediaMTX won't start without %path in it, recording or not
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S%z
+    recordSegmentDuration: 1h
+    # Fragmented MP4, written a second at a time, so a crash loses at most
+    # the last second
+    recordFormat: fmp4
+    recordPartDuration: 1s
+    # Deleted after RECORD_KEEP, 0s to keep them for good
+    recordDeleteAfter: 7d

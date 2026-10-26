@@ -11,8 +11,12 @@ services:
       # Letters, digits and _ are safest: MediaMTX refuses some characters, such
       # as /, and won't start, and in OBS's stream key + would read as a space
       MTX_AUTHINTERNALUSERS_0_PASS: ${INBOUND_STREAM_KEY:?Set INBOUND_STREAM_KEY in .env}
+      # Recording what comes in, if asked, and for how long it's kept
+      MTX_PATHS_LIVE_RECORD: ${RECORD:-false}
+      MTX_PATHS_LIVE_RECORDDELETEAFTER: ${RECORD_KEEP:-7d}
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./recordings:/recordings
 
   # Reads it back and sends it on to YouTube and Twitch
   rtmp-relay:
