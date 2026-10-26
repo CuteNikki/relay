@@ -3,8 +3,18 @@ import { createInterface } from 'node:readline';
 
 import { INPUT_URL, STALL_MS, STATUS_EVERY_MS } from './config';
 import type { Destination } from './destinations';
-import { hide, log } from './log';
+import { hide, log, logRepeating, type Level } from './log';
 import { stream, writeStatus } from './status';
+
+// How much what FFmpeg says matters to the relay. Its errors are warnings
+// here, since the relay deals with them by starting it again, and says so;
+// what it says as a matter of course, its settings and the like, is debug.
+const FFMPEG_LEVELS: Record<string, Level> = {
+  panic: 'warn',
+  fatal: 'warn',
+  error: 'warn',
+  warning: 'info',
+};
 
 /** "Stream #0:0: Video: h264 (High), yuv420p(…), 2560x1440 [SAR 1:1 DAR 16:9], 16000 kb/s, 60 fps, …" → "h264, 2560x1440, 60 fps" */
 function describeVideo(line: string) {
@@ -22,10 +32,10 @@ function describeAudio(line: string) {
   return [codec, rate, layout].filter(Boolean).join(', ');
 }
 
-/** Runs one platform's FFmpeg until it exits, and says how it did. */
+/** Runs one platform's FFmpeg until it exits, and says how and why. */
 export function relay(d: Destination) {
   const { out } = d;
-  const tag = `[${out.name}]`;
+  const plog = log.for(out.name);
   Object.assign(out, {
     state: 'connecting',
     since: undefined,
@@ -37,6 +47,11 @@ export function relay(d: Destination) {
   writeStatus(true);
 
   const ffmpeg = spawn('ffmpeg', [
+    '-hide_banner',
+    // Each line with how much it matters, "[info]", "[error]" and so on,
+    // for the relay to log it as that
+    '-loglevel',
+    'level+info',
     // Its progress as key=value lines on stdout, for the status, in place
     // of the line it would otherwise keep rewriting in the logs
     '-nostats',
@@ -51,26 +66,33 @@ export function relay(d: Destination) {
   // What it says about the stream: the input's streams come under
   // "Input #0", the outputs' under "Output #…"
   let section: 'input' | 'output' | undefined;
-  // The last thing it complained of, for the status should it fail.
-  // "Conversion failed!" is how it always ends, so says nothing.
+  // What it complained of, for the status and the logs should it fail
+  let errors: { at: number; text: string }[] = [];
   let complaint: string | undefined;
   createInterface({ input: ffmpeg.stderr! }).on('line', (line) => {
-    log(`${tag} ${line}`);
-    if (/^Input #0/.test(line)) {
+    // "[out#0/flv @ 0x…] [fatal] Error opening output …": who said it, if
+    // anyone in particular, how much it matters, and what
+    const [, who = '', level = 'info', text = line] =
+      line.match(/^(\[[^\]]+ @ [^\]]+\] )?\[(\w+)\] (.*)$/) ?? [];
+    logRepeating(plog, FFMPEG_LEVELS[level] ?? 'debug', `${who}${text}`);
+    if (/^Input #0/.test(text)) {
       section = 'input';
-    } else if (/^Output #/.test(line)) {
+    } else if (/^Output #/.test(text)) {
       section = 'output';
-    } else if (section === 'input' && /Stream #.*: Video:/.test(line)) {
-      stream.input.video = describeVideo(line);
-    } else if (section === 'input' && /Stream #.*: Audio:/.test(line)) {
-      stream.input.audio = describeAudio(line);
+    } else if (section === 'input' && /Stream #.*: Video:/.test(text)) {
+      stream.input.video = describeVideo(text);
+    } else if (section === 'input' && /Stream #.*: Audio:/.test(text)) {
+      stream.input.audio = describeAudio(text);
     }
-    if (
-      /error|fail|refused|denied|timed out|invalid|broken pipe/i.test(line) &&
-      !/^Conversion failed!$/.test(line.trim())
-    ) {
-      complaint = line.trim();
+    if (level === 'error' || level === 'fatal' || level === 'panic') {
+      errors = [...errors.slice(-19), { at: Date.now(), text: text.trim() }];
     }
+  });
+
+  // FFmpeg not there to start, or no room to start it: 'close' comes after
+  ffmpeg.on('error', (error) => {
+    complaint = `FFmpeg couldn't be started: ${error.message}`;
+    plog.error(`❌ ${complaint}`);
   });
 
   // FFmpeg's own fps, bitrate and speed are averages since it started, which
@@ -113,7 +135,7 @@ export function relay(d: Destination) {
         out.state = 'live';
         out.since = Date.now();
         delete out.lastError;
-        log(`✅ ${out.name}: sending`);
+        plog.info('✅ Sending');
         writeStatus(true);
       } else writeStatus();
     }
@@ -128,20 +150,27 @@ export function relay(d: Destination) {
     if (frames > lastFrame.frames) lastFrame = { frames, at: Date.now() };
     else if (Date.now() - lastFrame.at > STALL_MS) {
       complaint = `Sent no frames for ${STALL_MS / 1000} s`;
-      log(`⏱️ ${out.name}: ${complaint}, stopping its FFmpeg`);
+      plog.warn(`⏱️ ${complaint}, stopping its FFmpeg`);
       ffmpeg.kill('SIGKILL');
+      clearInterval(watchdog);
     }
   }, 1000);
 
-  /** How it exited, e.g. "code 1" or "signal SIGKILL" */
-  return new Promise<string>((resolve) => {
+  /** How it exited, e.g. "code 1" or "signal SIGKILL", and why, if it said */
+  return new Promise<{ how: string; why?: string }>((resolve) => {
     ffmpeg.on('close', (code, signal) => {
       clearInterval(watchdog);
       const how = signal ? `signal ${signal}` : `code ${code}`;
-      log(`${tag} FFmpeg exited with ${how}`);
-      if (code !== 0 && complaint) out.lastError = hide(complaint);
+      // The first error of the last few seconds before it exited, which says
+      // why, where the last says only that it gave up: "Connection refused"
+      // rather than "Error opening output files"
+      const last = errors.at(-1)?.at ?? 0;
+      const said = errors.find((e) => e.at >= last - 5000)?.text;
+      const why = complaint ?? said;
+      plog.debug(`FFmpeg exited with ${how}`);
+      if (code !== 0 && why) out.lastError = hide(why);
       d.ffmpeg = undefined;
-      resolve(how);
+      resolve({ how, why: why && hide(why) });
     });
   });
 }

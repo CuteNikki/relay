@@ -92,6 +92,7 @@ All in `.env`:
 | `TWITCH_INGEST`      | `rtmp://live.twitch.tv/app`       | A Twitch server nearer you, from [Twitch's list](https://help.twitch.tv/s/twitch-ingest-recommendation) |
 | `YOUTUBE_INGEST`     | `rtmp://a.rtmp.youtube.com/live2` | Another YouTube ingest address                                                                          |
 | `STATUS_FILE`        | `/tmp/relay/status.json`          | Where it writes whether it's live (see below)                                                           |
+| `LOG_LEVEL`          | `info`                            | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error`                       |
 
 ## Is it live?
 
@@ -150,6 +151,12 @@ To follow along as it streams:
 ```bash
 docker compose logs -f rtmp-relay
 ```
+
+Each line says when, how much it matters (`INFO`, `WARN`, `ERROR`) and which
+platform it's about, if one. A platform failing shows as a warning with
+FFmpeg's reason, such as `Connection refused`. FFmpeg's own chatter is left to
+`LOG_LEVEL=debug`, and a line it repeats is printed once a minute with a count,
+not with every frame.
 
 ## Licence
 

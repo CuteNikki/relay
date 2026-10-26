@@ -1,38 +1,36 @@
 /** The settings, from .env, checked before anything starts. */
 
+import { hideInLogs, log } from './log';
+
+/** Says what's wrong with the settings and stops: nothing can work without them. */
+function fail(text: string): never {
+  log.error(`❌ ${text}`);
+  process.exit(1);
+}
+
 const inboundKey = Bun.env.INBOUND_STREAM_KEY;
 // Each platform is streamed to only if its key is set
 export const TWITCH_KEY = Bun.env.TWITCH_STREAM_KEY || undefined;
 export const YT_KEY = Bun.env.YOUTUBE_STREAM_KEY || undefined;
 
-if (!inboundKey) {
-  console.error('❌ Set INBOUND_STREAM_KEY in .env: OBS streams with it');
-  process.exit(1);
-}
+if (!inboundKey) fail('Set INBOUND_STREAM_KEY in .env: OBS streams with it');
 // Typed as a string, now it's known to be set
 export const INBOUND_KEY = inboundKey;
 
 if (!TWITCH_KEY && !YT_KEY) {
-  console.error(
-    '❌ Set YOUTUBE_STREAM_KEY, TWITCH_STREAM_KEY or both in .env: there is nowhere to send the stream',
+  fail(
+    'Set YOUTUBE_STREAM_KEY, TWITCH_STREAM_KEY or both in .env: there is nowhere to send the stream',
   );
-  process.exit(1);
 }
 
 // Twitch takes less than YouTube, so its copy is scaled down and re-encoded
 export const TWITCH_RESOLUTION = Bun.env.TWITCH_RESOLUTION || '1920x1080';
 export const TWITCH_BITRATE = Bun.env.TWITCH_BITRATE || '6000k';
 if (!/^\d+x\d+$/.test(TWITCH_RESOLUTION)) {
-  console.error(
-    `❌ TWITCH_RESOLUTION should be like 1920x1080, not ${TWITCH_RESOLUTION}`,
-  );
-  process.exit(1);
+  fail(`TWITCH_RESOLUTION should be like 1920x1080, not ${TWITCH_RESOLUTION}`);
 }
 if (!/^\d+k$/.test(TWITCH_BITRATE)) {
-  console.error(
-    `❌ TWITCH_BITRATE should be like 6000k, not ${TWITCH_BITRATE}`,
-  );
-  process.exit(1);
+  fail(`TWITCH_BITRATE should be like 6000k, not ${TWITCH_BITRATE}`);
 }
 
 // Where each platform takes streams. Twitch has servers nearer the VPS than
@@ -41,11 +39,20 @@ export const TWITCH_INGEST =
   Bun.env.TWITCH_INGEST ?? 'rtmp://live.twitch.tv/app';
 export const YT_INGEST =
   Bun.env.YOUTUBE_INGEST ?? 'rtmp://a.rtmp.youtube.com/live2';
+for (const [name, url] of [
+  ['TWITCH_INGEST', TWITCH_INGEST],
+  ['YOUTUBE_INGEST', YT_INGEST],
+] as const) {
+  if (!/^rtmps?:\/\/[^/]+/.test(url)) {
+    fail(`${name} should be an rtmp:// or rtmps:// address, not ${url}`);
+  }
+}
 
 // MediaMTX, which OBS streams to, and which takes a stream only with
 // INBOUND_STREAM_KEY as its password; the relay reads it back from there
 const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
 export const PASS = encodeURIComponent(INBOUND_KEY);
+hideInLogs(INBOUND_KEY, PASS, TWITCH_KEY, YT_KEY);
 export const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS}`;
 // Its API, which says when a stream has come in
 export const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;

@@ -56,6 +56,9 @@ export const stream: Pick<Status, 'live' | 'since' | 'input'> = {
   input: {},
 };
 let lastWrite = 0;
+// Whether the last write failed, so a status that can't be written is said
+// once, and once more when it can again, rather than every 2 seconds
+let failing = false;
 
 /** Writes the status whole, through a temporary file, so it's never read half written. */
 export function writeStatus(force = false) {
@@ -73,8 +76,12 @@ export function writeStatus(force = false) {
     mkdirSync(dirname(STATUS_FILE), { recursive: true });
     writeFileSync(`${STATUS_FILE}.tmp`, JSON.stringify(status));
     renameSync(`${STATUS_FILE}.tmp`, STATUS_FILE);
+    if (failing)
+      log.info(`✅ The status can be written to ${STATUS_FILE} again`);
+    failing = false;
   } catch (error) {
-    log(`⚠️ Couldn't write the status: ${error}`);
+    if (!failing) log.warn(`⚠️ Couldn't write the status: ${error}`);
+    failing = true;
   }
 }
 
