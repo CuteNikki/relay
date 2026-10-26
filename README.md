@@ -19,10 +19,15 @@ OBS ──RTMP──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──▶ You
 - **[MediaMTX](https://github.com/bluenviron/mediamtx)** takes the stream from
   OBS, but only with the right password, so nobody else can stream to your
   channels through it.
-- **The relay** waits until a stream comes in, then runs FFmpeg to send it on.
-  YouTube gets a straight copy, which costs almost no CPU. Twitch gets its own
-  encode at the resolution and bitrate you set. When the stream ends, the relay
-  waits for the next one by itself.
+- **The relay** waits until a stream comes in, then runs one FFmpeg per
+  platform to send it on. YouTube gets a straight copy, which costs almost no
+  CPU. Twitch gets its own encode at the resolution and bitrate you set, with a
+  keyframe every 2 seconds whatever your frame rate. When the stream ends, the
+  relay waits for the next one by itself.
+- If one platform fails, say Twitch turns the key away or its server drops
+  out, the others keep going. The relay tries that platform again after 2
+  seconds, then waits twice as long each time it fails in a row, up to 30
+  seconds.
 - Stream keys are hidden in everything it logs, since FFmpeg prints its full
   addresses.
 
@@ -101,18 +106,38 @@ stream is coming in, what it is, and how the relay is keeping up:
     "audio": "aac, 48000 Hz, stereo"
   },
   "fps": 60,
-  "bitrate": "22000.5kbits/s",
+  "bitrate": "16000.2kbits/s",
   "speed": "1x",
   "droppedFrames": 0,
   "outputs": [
-    { "name": "YouTube", "sends": "as it comes in" },
-    { "name": "Twitch", "sends": "1080p at 6000 kb/s" }
+    {
+      "name": "YouTube",
+      "sends": "as it comes in",
+      "state": "live",
+      "since": 1792700001000,
+      "bitrate": "16000.2kbits/s",
+      "speed": "1x",
+      "droppedFrames": 0,
+      "retries": 0
+    },
+    {
+      "name": "Twitch",
+      "sends": "1080p at 6000 kb/s",
+      "state": "retrying",
+      "retries": 2,
+      "lastError": "Error opening output files: I/O error"
+    }
   ],
   "updatedAt": 1792700002000
 }
 ```
 
-A `speed` below `1x` means it's falling behind. A dashboard can read the file
+Each output's `state` is `waiting` (no stream), `connecting`, `live` or
+`retrying` (it failed and will try again). `retries` counts its restarts
+during this stream, and `lastError` is what FFmpeg last complained of. The
+`fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
+that are live: bitrates and dropped frames added up, frame rate and speed
+from the slowest. A `speed` below `1x` means it's falling behind. A dashboard can read the file
 with `docker exec rtmp-relay cat /tmp/relay/status.json`. The compose file
 labels the container `dash.app: relay` for
 [dash](https://github.com/CuteNikki/dash), which shows this on its tile.
