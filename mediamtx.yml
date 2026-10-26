@@ -5,6 +5,12 @@
 logLevel: info
 logDestinations: [stdout]
 
+# How long OBS can send nothing before it's taken as gone, rather than
+# MediaMTX's 10 seconds: OBS sends many times a second, so 5 quiet seconds
+# is a connection that's dropped, and with the fallback, the platforms get
+# its clip that much sooner, before they give up waiting themselves
+readTimeout: 5s
+
 # One user, for OBS to publish as and the relay to read and ask after the
 # stream as. Its password is INBOUND_STREAM_KEY, given in docker-compose.yml
 # as MTX_AUTHINTERNALUSERS_0_PASS, so it's never in this file; the compose
@@ -57,6 +63,18 @@ paths:
     recordPartDuration: 1s
     # Deleted after RECORD_KEEP, 0s to keep them for good
     recordDeleteAfter: 7d
+    # The fallback: while OBS has dropped out, a clip plays on repeat in its
+    # place, so the platforms keep the stream going, if FALLBACK=true in .env,
+    # given as MTX_PATHS_LIVE_ALWAYSAVAILABLE. OBS must then send what the
+    # clip is made of, H.264 video and AAC audio at 48 kHz in stereo, or
+    # MediaMTX turns it away.
+    alwaysAvailable: false
+    # The clip, in ./fallback: be-right-back.mp4, or FALLBACK_FILE, given as
+    # MTX_PATHS_LIVE_ALWAYSAVAILABLEFILE
+    alwaysAvailableFile: /fallback/be-right-back.mp4
+    # Recording only what OBS sends: the clip, which plays whenever OBS
+    # isn't there, would otherwise be recorded day and night
+    alwaysAvailableRecorded: false
     # What encrypts the stream from OBS by SRT, if SRT_PASSPHRASE is set in
     # .env, given as MTX_PATHS_LIVE_SRTPUBLISHPASSPHRASE; RTMP isn't
     # encrypted either way

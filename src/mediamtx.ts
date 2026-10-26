@@ -20,6 +20,22 @@ function trouble(level: 'warn' | 'error', text: string) {
   problem = text;
 }
 
+// When OBS last sent anything, by the bytes MediaMTX says it's had, counted
+// only while OBS is there: with the fallback, MediaMTX's own clip comes in
+// after it's gone
+let inbound = { bytes: -1, at: 0 };
+
+/**
+ * How long nothing had come from OBS before it went, to tell stopping on
+ * purpose from dropping out: OBS stopping sends right up to the end, while a
+ * connection that's dropped goes quiet, and MediaMTX only gives up on it
+ * seconds later: 5, its readTimeout, less over SRT, whose buffer keeps
+ * coming in for a couple of seconds after OBS has gone.
+ */
+export function quietBeforeLeaving() {
+  return Date.now() - inbound.at;
+}
+
 /** What's wrong with MediaMTX, if anything, for the status and the health check. */
 export function mediamtxProblem() {
   return problem;
@@ -65,8 +81,16 @@ export async function streamIsIn() {
     return false;
   }
   try {
-    const online = ((await res.json()) as { online?: boolean }).online === true;
+    const path = (await res.json()) as {
+      online?: boolean;
+      inboundBytes?: number;
+      /** What inboundBytes was called before */
+      bytesReceived?: number;
+    };
     fine();
+    const online = path.online === true;
+    const bytes = path.inboundBytes ?? path.bytesReceived ?? 0;
+    if (online && bytes !== inbound.bytes) inbound = { bytes, at: Date.now() };
     return online;
   } catch (error) {
     trouble(

@@ -35,3 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # what MediaMTX records, if RECORD=true
 recordings
+
+# your own fallback clip, if any: only the one that comes with it is kept
+fallback/*
+!fallback/be-right-back.mp4

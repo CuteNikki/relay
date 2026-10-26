@@ -162,8 +162,11 @@ export const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
 export const STATUS_FILE = setting('STATUS_FILE') ?? '/tmp/relay/status.json';
 // How often the status is written while live, at most
 export const STATUS_EVERY_MS = 2000;
-// How often MediaMTX is asked whether a stream has come in
-export const WAIT_MS = 2000;
+// How often MediaMTX is asked whether a stream has come in: often enough to
+// tell OBS stopping, which sends right up to the end, from its dropping out,
+// which goes quiet for seconds before MediaMTX gives up on it; over SRT, its
+// buffer, a couple of seconds, keeps coming in first, so as few as 3
+export const WAIT_MS = 250;
 // How long a platform's FFmpeg waits to start again after failing, doubling
 // each time it fails in a row, up to the most; a run that lasted
 // STABLE_MS counts as having worked, and starts the wait over
@@ -171,5 +174,74 @@ export const RETRY_MIN_MS = 2000;
 export const RETRY_MAX_MS = 30_000;
 export const STABLE_MS = 60_000;
 // How long a platform's FFmpeg can go without sending a frame before it's
-// taken as hung and stopped, to be started again
-export const STALL_MS = 15_000;
+// taken as hung and stopped, to be started again. Longer than OBS can be
+// gone before MediaMTX gives up on it and plays the fallback: over SRT, that's
+// about 15 seconds.
+export const STALL_MS = 30_000;
+
+/** "90s", "5m" or "1h" in milliseconds */
+function duration(name: string, value: string) {
+  const [, n, unit] = value.match(/^(\d+)(s|m|h)$/) ?? [];
+  if (!n || !unit) fail(`${name} should be like 90s, 5m or 1h, not ${value}`);
+  return (
+    Number(n) * { s: 1000, m: 60_000, h: 3_600_000 }[unit as 's' | 'm' | 'h']
+  );
+}
+
+// While OBS has dropped out, MediaMTX plays a clip in its place, if
+// FALLBACK=true: the platforms keep the stream going, and nobody leaves. It
+// ends the stream if OBS doesn't come back within FALLBACK_FOR. OBS stopping
+// on purpose ends it at once, fallback or not.
+const fallback = setting('FALLBACK') ?? 'false';
+if (fallback !== 'true' && fallback !== 'false') {
+  fail(`FALLBACK should be true or false, not ${fallback}`);
+}
+export const FALLBACK = fallback === 'true';
+export const FALLBACK_FOR_MS = duration(
+  'FALLBACK_FOR',
+  setting('FALLBACK_FOR') ?? '5m',
+);
+
+// The clip, checked here as MediaMTX won't start without it, taking RTMP and
+// SRT down too, and turns OBS away, without a word, unless OBS sends what
+// the clip is made of; OBS sends H.264, and AAC at 48 kHz in stereo, unless
+// told otherwise
+const FALLBACK_DIR = setting('FALLBACK_DIR') ?? '/fallback';
+if (FALLBACK) {
+  const file = setting('FALLBACK_FILE') ?? 'be-right-back.mp4';
+  const probe = Bun.spawnSync([
+    'ffprobe',
+    '-v',
+    'error',
+    '-show_entries',
+    'stream=codec_type,codec_name,sample_rate,channels',
+    '-of',
+    'json',
+    `${FALLBACK_DIR}/${file}`,
+  ]);
+  if (probe.exitCode !== 0) {
+    fail(
+      `FALLBACK_FILE ${file} isn't a video in ./fallback that can be read (${probe.stderr.toString().trim()}): MediaMTX won't start without it`,
+    );
+  }
+  const { streams = [] } = JSON.parse(probe.stdout.toString()) as {
+    streams?: {
+      codec_type: string;
+      codec_name: string;
+      sample_rate?: string;
+      channels?: number;
+    }[];
+  };
+  const video = streams.find((s) => s.codec_type === 'video');
+  const audio = streams.find((s) => s.codec_type === 'audio');
+  if (
+    video?.codec_name !== 'h264' ||
+    audio?.codec_name !== 'aac' ||
+    audio.sample_rate !== '48000' ||
+    audio.channels !== 2
+  ) {
+    fail(
+      `FALLBACK_FILE ${file} should be H.264 video with AAC audio at 48 kHz in stereo, as OBS sends, or MediaMTX turns OBS away: it's ${video?.codec_name ?? 'no'} video and ${audio ? `${audio.codec_name} audio at ${audio.sample_rate} Hz in ${audio.channels} channels` : 'no audio'}`,
+    );
+  }
+}

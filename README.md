@@ -120,6 +120,9 @@ All in `.env`:
 | `STATUS_FILE`        | `/tmp/relay/status.json` | Where it writes whether it's live (see below)                                     |
 | `LOG_LEVEL`          | `info`                   | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error` |
 | `SRT_PASSPHRASE`     | (none)                   | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start      |
+| `FALLBACK`           | `false`                  | `true` shows a clip while OBS has dropped out (see below)                         |
+| `FALLBACK_FOR`       | `5m`                     | How long the clip can play before the stream ends, as `90s`, `5m` or `1h`         |
+| `FALLBACK_FILE`      | `be-right-back.mp4`      | Which clip in `./fallback` plays                                                  |
 | `RECORD`             | `false`                  | `true` records what comes in to `./recordings` (see below)                        |
 | `RECORD_KEEP`        | `7d`                     | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good   |
 
@@ -175,6 +178,53 @@ Before outputs, YouTube and Twitch had settings of their own:
 relay won't start with those in `.env`, and says which they are, so move them
 to outputs as above.
 
+## Fallback
+
+With `FALLBACK=true` in `.env`, a stream doesn't end on YouTube and Twitch when
+your connection does. If OBS drops out, a "be right back" clip plays in its
+place, so the platforms keep the stream going and your viewers stay. When
+OBS reconnects, the stream picks up from OBS again by itself. If OBS doesn't
+come back within `FALLBACK_FOR`, 5 minutes unless you set it, the stream ends.
+
+Stopping the stream in OBS still ends it everywhere at once. The relay tells
+the two apart by when OBS went quiet: OBS stopping sends right up to the end,
+while a connection that's dropped goes quiet for a few seconds before
+MediaMTX gives up on it, 5 over RTMP and about 3 over SRT.
+
+| What happened                    | What the platforms see         |
+| -------------------------------- | ------------------------------ |
+| You stop streaming in OBS        | The stream ends                |
+| Your connection drops            | The clip, after 3–5 s          |
+| OBS or your PC crashes, over SRT | The clip                       |
+| OBS crashes, over RTMP           | The stream ends                |
+| OBS doesn't come back in time    | The clip, then the stream ends |
+
+Three things to know:
+
+- **OBS must send stereo audio at 48 kHz** (Settings > Audio), as it does
+  unless changed, and H.264 video. MediaMTX turns away a stream that doesn't
+  match the clip, and nothing else says so: OBS just can't connect.
+- **Over SRT, keep `latency` at 2 seconds or under.** SRT's buffer keeps
+  coming in after OBS has gone, and with much more of it, a drop looks like
+  stopping on purpose, and the stream ends.
+- **YouTube gets the clip as it is**, as it gets OBS's stream. The clip that
+  comes with the relay is 1920x1080 at 30 fps; if you stream at another size,
+  YouTube's picture changes size when it starts, so a clip of your own at
+  your size is better. Twitch's copy is scaled as always.
+
+Your own clip goes in `fallback/`, named in `FALLBACK_FILE`. It must be an
+MP4 of H.264 video and AAC audio at 48 kHz in stereo, as OBS sends; the relay
+checks it when it starts, and says what's wrong if it isn't. From an image,
+`brb.png`, at 2560x1440 and 60 fps:
+
+```bash
+ffmpeg -loop 1 -framerate 60 -i brb.png -f lavfi -i anullsrc=r=48000:cl=stereo \
+  -t 2 -vf scale=2560:1440 -c:v libx264 -pix_fmt yuv420p -g 60 -c:a aac -shortest \
+  fallback/brb.mp4
+```
+
+After changing any of these, run `docker compose up -d` again.
+
 ## Recording
 
 With `RECORD=true` in `.env`, MediaMTX keeps a copy of what OBS sends, at full
@@ -205,6 +255,7 @@ stream is coming in, what it is, and how the relay is keeping up:
     "video": "h264, 2560x1440, 60 fps",
     "audio": "aac, 48000 Hz, stereo"
   },
+  "fallbackSince": 1792700001500,
   "fps": 60,
   "bitrate": "16000.2kbits/s",
   "speed": "1x",
@@ -238,6 +289,9 @@ Each output's `state` is `waiting` (no stream), `connecting`, `live` or
 during this stream, and `lastError` is why it last failed. Its `fps`,
 `bitrate` and `speed` cover the last couple of seconds, not the whole time
 since it started, so a drop shows straight away.
+
+`fallbackSince` is there while OBS has dropped out and the fallback clip is
+playing, since when.
 
 The `fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
 that are live: bitrates and dropped frames added up, frame rate and speed from

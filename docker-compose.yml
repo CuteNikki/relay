@@ -18,9 +18,13 @@ services:
       MTX_PATHS_LIVE_RECORDDELETEAFTER: ${RECORD_KEEP:-7d}
       # Encrypting what OBS sends by SRT, if a passphrase is set
       MTX_PATHS_LIVE_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:-}
+      # A clip in OBS's place while it's dropped out, if asked, and which
+      MTX_PATHS_LIVE_ALWAYSAVAILABLE: ${FALLBACK:-false}
+      MTX_PATHS_LIVE_ALWAYSAVAILABLEFILE: /fallback/${FALLBACK_FILE:-be-right-back.mp4}
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
       - ./recordings:/recordings
+      - ./fallback:/fallback:ro
 
   # Reads it back and sends it on to YouTube and Twitch
   rtmp-relay:
@@ -32,6 +36,9 @@ services:
     depends_on:
       - mediamtx
     stop_signal: SIGINT
+    volumes:
+      # To check the fallback clip, which MediaMTX won't start without
+      - ./fallback:/fallback:ro
     labels:
       # dash reads whether it's live from its status file
       dash.app: relay

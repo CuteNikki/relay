@@ -37,6 +37,11 @@ export type Status = {
   since?: number;
   /** What comes in, e.g. "h264, 2560x1440, 60 fps" and "aac, 48000 Hz, stereo" */
   input: { video?: string; audio?: string };
+  /**
+   * Since when OBS has been gone and the fallback clip has been playing in
+   * its place, while it is, in milliseconds since 1970
+   */
+  fallbackSince?: number;
   // The outputs sending, taken together, as when one FFmpeg sent to them all
   /** The slowest one's */
   fps?: number;
@@ -57,7 +62,10 @@ export type Status = {
 };
 
 // Whether a stream is coming in, by MediaMTX, since when, and what it is
-export const stream: Pick<Status, 'live' | 'since' | 'input'> = {
+export const stream: Pick<
+  Status,
+  'live' | 'since' | 'input' | 'fallbackSince'
+> = {
   live: false,
   input: {},
 };

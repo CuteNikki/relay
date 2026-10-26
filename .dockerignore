@@ -5,3 +5,4 @@ recordings
 node_modules
 .env
 .git
+fallback
