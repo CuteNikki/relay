@@ -9,6 +9,7 @@ import {
   WAIT_MS,
 } from './src/config';
 import { DESTINATIONS, idle, type Destination } from './src/destinations';
+import { checkFallbackClips } from './src/fallback';
 import { relay } from './src/ffmpeg';
 import { INPUTS, reset, type Input } from './src/inputs';
 import { log } from './src/log';
@@ -187,4 +188,5 @@ function crash(error: unknown) {
 process.on('uncaughtException', crash);
 process.on('unhandledRejection', crash);
 
+if (FALLBACK) checkFallbackClips();
 void watch();

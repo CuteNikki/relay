@@ -1,6 +1,6 @@
 {
   "name": "relay",
-  "description": "Takes one RTMP stream from OBS and sends it on to YouTube and Twitch at once",
+  "description": "Takes the stream from OBS and sends it on to any number of RTMP and RTMPS platforms at once",
   "license": "MIT",
   "module": "index.ts",
   "type": "module",
