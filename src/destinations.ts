@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 
 import { OUTPUTS, type OutputSettings } from './config';
+import { inputFor } from './inputs';
 import type { Output } from './status';
 
 /**
@@ -65,16 +66,26 @@ function args({ url, key, encode }: OutputSettings) {
   ];
 }
 
-/** Where the stream goes, each with its FFmpeg's arguments, in order. */
+/** Where the stream goes, each with which of OBS's streams it reads and its FFmpeg's arguments, in order. */
 export const DESTINATIONS = OUTPUTS.map((output) => ({
+  input: inputFor(output.input),
   args: args(output),
-  out: idle(output.name, describe(output)),
+  out: idle({
+    name: output.name,
+    sends: describe(output),
+    input: output.input,
+  }),
   ffmpeg: undefined as ChildProcess | undefined,
   /** Whether send() is looking after it, so it's never started twice */
   running: false,
 }));
 export type Destination = (typeof DESTINATIONS)[number];
 
-export function idle(name: string, sends: string): Output {
-  return { name, sends, state: 'waiting', retries: 0 };
+/** An output waiting for a stream, as it was before it was sent one */
+export function idle({
+  name,
+  sends,
+  input,
+}: Pick<Output, 'name' | 'sends' | 'input'>): Output {
+  return { name, sends, input, state: 'waiting', retries: 0 };
 }

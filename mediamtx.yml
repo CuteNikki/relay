@@ -22,10 +22,15 @@ authInternalUsers:
     pass: set-by-MTX_AUTHINTERNALUSERS_0_PASS
     ips: []
     permissions:
+      # live is OBS's usual landscape stream, vertical a second one in 9:16
       - action: publish
         path: live
       - action: read
         path: live
+      - action: publish
+        path: vertical
+      - action: read
+        path: vertical
       - action: api
 
 # For the relay to see when a stream comes in. Reached only on the stack's
@@ -47,35 +52,45 @@ metrics: false
 pprof: false
 playback: false
 
+# What both of OBS's streams have in common
+pathDefaults:
+  # Recording what comes in, to ./recordings on the server, if RECORD=true
+  # in .env; docker-compose.yml gives these from .env as
+  # MTX_PATHDEFAULTS_RECORD and MTX_PATHDEFAULTS_RECORDDELETEAFTER
+  record: false
+  # A file an hour, named for when it starts, in UTC, in recordings/live/
+  # and recordings/vertical/: MediaMTX won't start without %path in it,
+  # recording or not
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S%z
+  recordSegmentDuration: 1h
+  # Fragmented MP4, written a second at a time, so a crash loses at most
+  # the last second
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  # Deleted after RECORD_KEEP, 0s to keep them for good
+  recordDeleteAfter: 7d
+  # The fallback: while OBS has dropped out, a clip plays on repeat in its
+  # place, so the platforms keep the stream going, if FALLBACK=true in .env,
+  # given as MTX_PATHDEFAULTS_ALWAYSAVAILABLE. OBS must then send what the
+  # clip is made of, H.264 video and AAC audio at 48 kHz in stereo, or
+  # MediaMTX turns it away.
+  alwaysAvailable: false
+  # Recording only what OBS sends: the clip, which plays whenever OBS
+  # isn't there, would otherwise be recorded day and night
+  alwaysAvailableRecorded: false
+  # What encrypts the stream from OBS by SRT, if SRT_PASSPHRASE is set in
+  # .env, given as MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE; RTMP isn't
+  # encrypted either way
+  srtPublishPassphrase:
+
 paths:
+  # OBS's usual landscape stream, to the path it's always streamed to
   live:
-    # Recording what comes in, to ./recordings on the server, if RECORD=true
-    # in .env; docker-compose.yml gives these from .env as
-    # MTX_PATHS_LIVE_RECORD and MTX_PATHS_LIVE_RECORDDELETEAFTER
-    record: false
-    # A file an hour, named for when it starts, in UTC, in recordings/live/:
-    # MediaMTX won't start without %path in it, recording or not
-    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S%z
-    recordSegmentDuration: 1h
-    # Fragmented MP4, written a second at a time, so a crash loses at most
-    # the last second
-    recordFormat: fmp4
-    recordPartDuration: 1s
-    # Deleted after RECORD_KEEP, 0s to keep them for good
-    recordDeleteAfter: 7d
-    # The fallback: while OBS has dropped out, a clip plays on repeat in its
-    # place, so the platforms keep the stream going, if FALLBACK=true in .env,
-    # given as MTX_PATHS_LIVE_ALWAYSAVAILABLE. OBS must then send what the
-    # clip is made of, H.264 video and AAC audio at 48 kHz in stereo, or
-    # MediaMTX turns it away.
-    alwaysAvailable: false
-    # The clip, in ./fallback: be-right-back.mp4, or FALLBACK_FILE, given as
-    # MTX_PATHS_LIVE_ALWAYSAVAILABLEFILE
+    # Its fallback clip, in ./fallback: be-right-back.mp4, or FALLBACK_FILE,
+    # given as MTX_PATHS_LIVE_ALWAYSAVAILABLEFILE
     alwaysAvailableFile: /fallback/be-right-back.mp4
-    # Recording only what OBS sends: the clip, which plays whenever OBS
-    # isn't there, would otherwise be recorded day and night
-    alwaysAvailableRecorded: false
-    # What encrypts the stream from OBS by SRT, if SRT_PASSPHRASE is set in
-    # .env, given as MTX_PATHS_LIVE_SRTPUBLISHPASSPHRASE; RTMP isn't
-    # encrypted either way
-    srtPublishPassphrase:
+  # A second, vertical stream from OBS, for platforms that want 9:16
+  vertical:
+    # Its fallback clip: be-right-back-vertical.mp4, or
+    # FALLBACK_VERTICAL_FILE, given as MTX_PATHS_VERTICAL_ALWAYSAVAILABLEFILE
+    alwaysAvailableFile: /fallback/be-right-back-vertical.mp4

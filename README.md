@@ -3,7 +3,8 @@
 Stream to YouTube and Twitch at once while uploading only once. OBS sends a
 single stream to your server, and the relay sends it on to both: to YouTube
 untouched, at whatever quality you stream in, and to Twitch scaled down to
-what Twitch takes. Other platforms, such as Kick, can be added too.
+what Twitch takes. Other platforms, such as Kick, can be added too, and OBS
+can send a second, vertical stream for YouTube Shorts and TikTok.
 
 It's useful when your upload can carry one high-quality stream but not two,
 or when you want YouTube to get more than Twitch allows (say 1440p at
@@ -113,18 +114,19 @@ seconds, as YouTube asks.
 
 All in `.env`:
 
-| Setting              | Default                  | What it's for                                                                     |
-| -------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| `INBOUND_STREAM_KEY` | (required)               | The password OBS streams with                                                     |
-| `OUTPUT_n_…`         |                          | Where it sends (see [Where it sends](#where-it-sends))                            |
-| `STATUS_FILE`        | `/tmp/relay/status.json` | Where it writes whether it's live (see below)                                     |
-| `LOG_LEVEL`          | `info`                   | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error` |
-| `SRT_PASSPHRASE`     | (none)                   | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start      |
-| `FALLBACK`           | `false`                  | `true` shows a clip while OBS has dropped out (see below)                         |
-| `FALLBACK_FOR`       | `5m`                     | How long the clip can play before the stream ends, as `90s`, `5m` or `1h`         |
-| `FALLBACK_FILE`      | `be-right-back.mp4`      | Which clip in `./fallback` plays                                                  |
-| `RECORD`             | `false`                  | `true` records what comes in to `./recordings` (see below)                        |
-| `RECORD_KEEP`        | `7d`                     | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good   |
+| Setting                  | Default                      | What it's for                                                                     |
+| ------------------------ | ---------------------------- | --------------------------------------------------------------------------------- |
+| `INBOUND_STREAM_KEY`     | (required)                   | The password OBS streams with                                                     |
+| `OUTPUT_n_…`             |                              | Where it sends (see [Where it sends](#where-it-sends))                            |
+| `STATUS_FILE`            | `/tmp/relay/status.json`     | Where it writes whether it's live (see below)                                     |
+| `LOG_LEVEL`              | `info`                       | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error` |
+| `SRT_PASSPHRASE`         | (none)                       | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start      |
+| `FALLBACK`               | `false`                      | `true` shows a clip while OBS has dropped out (see below)                         |
+| `FALLBACK_FOR`           | `5m`                         | How long the clip can play before the stream ends, as `90s`, `5m` or `1h`         |
+| `FALLBACK_FILE`          | `be-right-back.mp4`          | Which clip in `./fallback` plays                                                  |
+| `FALLBACK_VERTICAL_FILE` | `be-right-back-vertical.mp4` | Which clip in `./fallback` plays for the vertical stream                          |
+| `RECORD`                 | `false`                      | `true` records what comes in to `./recordings` (see below)                        |
+| `RECORD_KEEP`            | `7d`                         | How long recordings are kept, as `7d`, `12h` or `30m`; `0s` keeps them for good   |
 
 ## Where it sends
 
@@ -146,14 +148,15 @@ OUTPUT_2_BITRATE=6000k
 Any other platform that takes RTMP or RTMPS, such as Kick, is another output,
 `OUTPUT_3_…`, with the address and key from its dashboard.
 
-| Setting               | What it's for                                                                    |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `OUTPUT_n_NAME`       | What it's called in the logs and the status; `Output n` if left out              |
-| `OUTPUT_n_URL`        | The server address the platform gives you, `rtmp://` or `rtmps://` (required)    |
-| `OUTPUT_n_KEY`        | Its stream key; an output without one is left out                                |
-| `OUTPUT_n_RESOLUTION` | Re-encodes it at this size, such as `1280x720`                                   |
-| `OUTPUT_n_BITRATE`    | Re-encodes it at this video bitrate, such as `4000k`; `6000k` if only a size set |
-| `OUTPUT_n_PRESET`     | Re-encodes it with this x264 preset, `superfast` unless set (see below)          |
+| Setting               | What it's for                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `OUTPUT_n_NAME`       | What it's called in the logs and the status; `Output n` if left out                   |
+| `OUTPUT_n_URL`        | The server address the platform gives you, `rtmp://` or `rtmps://` (required)         |
+| `OUTPUT_n_KEY`        | Its stream key; an output without one is left out                                     |
+| `OUTPUT_n_RESOLUTION` | Re-encodes it at this size, such as `1280x720`                                        |
+| `OUTPUT_n_BITRATE`    | Re-encodes it at this video bitrate, such as `4000k`; `6000k` if only a size set      |
+| `OUTPUT_n_PRESET`     | Re-encodes it with this x264 preset, `superfast` unless set (see below)               |
+| `OUTPUT_n_INPUT`      | Which of OBS's streams it gets: `landscape`, the usual one, or `vertical` (see below) |
 
 Without a resolution, bitrate or preset, an output gets the stream as it
 comes in, like YouTube above, which costs almost no CPU. With any of them, it
@@ -177,6 +180,48 @@ Before outputs, YouTube and Twitch had settings of their own:
 `YOUTUBE_STREAM_KEY`, `TWITCH_STREAM_KEY`, `TWITCH_RESOLUTION` and so on. The
 relay won't start with those in `.env`, and says which they are, so move them
 to outputs as above.
+
+## Vertical streams
+
+YouTube Shorts and TikTok want a vertical stream, in 9:16. Cutting one out of
+your landscape stream would lose most of the picture, so OBS sends a second
+stream, laid out for vertical, and the relay passes it on to the platforms
+that want it. It's a second upload, so your connection needs to carry both:
+say 16 Mb/s landscape and 6 to 8 Mb/s vertical.
+
+**In OBS**, the free [Aitum Vertical](https://aitum.tv/) plugin adds a second,
+vertical canvas, with scenes of its own and a stream button of its own. In
+its settings, stream to the relay as above, with `vertical` in place of
+`live`:
+
+| Setting    | Value                                                     |
+| ---------- | --------------------------------------------------------- |
+| Server     | `rtmp://your-server:1936`                                 |
+| Stream key | `vertical?user=relay&pass=` and your `INBOUND_STREAM_KEY` |
+
+By SRT, it's `streamid=publish:vertical:relay:` and your key, in the same
+address as above.
+
+**In `.env`**, an output gets the vertical stream with `OUTPUT_n_INPUT=vertical`:
+
+```bash
+OUTPUT_3_NAME=Shorts
+OUTPUT_3_URL=rtmp://a.rtmp.youtube.com/live2
+OUTPUT_3_KEY=…
+OUTPUT_3_INPUT=vertical
+```
+
+YouTube Shorts is a second live stream on your YouTube channel, with a stream
+key of its own: in YouTube Studio, create another stream and copy its key. A
+YouTube stream that's vertical shows as a Short. TikTok gives some accounts a
+stream key for streaming from OBS; with one, it's another output like this.
+
+Each stream comes and goes on its own: the landscape platforms go live when
+the landscape stream comes in, and the vertical ones when the vertical one
+does. With the fallback on, each has its own clip:
+`fallback/be-right-back-vertical.mp4`, or your own in
+`FALLBACK_VERTICAL_FILE`. With recording on, the vertical stream is recorded
+to `recordings/vertical/`.
 
 ## Fallback
 
@@ -256,6 +301,18 @@ stream is coming in, what it is, and how the relay is keeping up:
     "audio": "aac, 48000 Hz, stereo"
   },
   "fallbackSince": 1792700001500,
+  "inputs": [
+    {
+      "name": "landscape",
+      "live": true,
+      "since": 1792700000000,
+      "media": {
+        "video": "h264, 2560x1440, 60 fps",
+        "audio": "aac, 48000 Hz, stereo"
+      },
+      "fallbackSince": 1792700001500
+    }
+  ],
   "fps": 60,
   "bitrate": "16000.2kbits/s",
   "speed": "1x",
@@ -264,6 +321,7 @@ stream is coming in, what it is, and how the relay is keeping up:
     {
       "name": "YouTube",
       "sends": "as it comes in",
+      "input": "landscape",
       "state": "live",
       "since": 1792700001000,
       "bitrate": "16000.2kbits/s",
@@ -274,6 +332,7 @@ stream is coming in, what it is, and how the relay is keeping up:
     {
       "name": "Twitch",
       "sends": "1080p at 6000 kb/s",
+      "input": "landscape",
       "state": "retrying",
       "retries": 2,
       "lastError": "RTMP_Connect0, failed to connect socket. 111 (Connection refused)"
@@ -292,6 +351,12 @@ since it started, so a drop shows straight away.
 
 `fallbackSince` is there while OBS has dropped out and the fallback clip is
 playing, since when.
+
+`inputs` has each of OBS's streams that an output wants: `landscape`, and
+`vertical` if any output gets it, each with whether it's live, since when,
+what it is and its fallback. `live`, `since`, `input` and `fallbackSince` at
+the top are the landscape stream's, or the vertical one's when only it is
+live. Each output says which stream it gets in `input`.
 
 The `fps`, `bitrate`, `speed` and `droppedFrames` at the top cover the outputs
 that are live: bitrates and dropped frames added up, frame rate and speed from

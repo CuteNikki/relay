@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import { INPUT_URL, STALL_MS, STATUS_EVERY_MS } from './config';
+import { STALL_MS, STATUS_EVERY_MS } from './config';
 import type { Destination } from './destinations';
 import { hide, log, logRepeating, type Level } from './log';
-import { stream, writeStatus } from './status';
+import { writeStatus } from './status';
 
 // How much what FFmpeg says matters to the relay. Its errors are warnings
 // here, since the relay deals with them by starting it again, and says so;
@@ -58,7 +58,7 @@ export function relay(d: Destination) {
     '-progress',
     'pipe:1',
     '-i',
-    INPUT_URL,
+    d.input.url,
     ...d.args,
   ]);
   d.ffmpeg = ffmpeg;
@@ -80,9 +80,9 @@ export function relay(d: Destination) {
     } else if (/^Output #/.test(text)) {
       section = 'output';
     } else if (section === 'input' && /Stream #.*: Video:/.test(text)) {
-      stream.input.video = describeVideo(text);
+      d.input.media.video = describeVideo(text);
     } else if (section === 'input' && /Stream #.*: Audio:/.test(text)) {
-      stream.input.audio = describeAudio(text);
+      d.input.media.audio = describeAudio(text);
     }
     if (level === 'error' || level === 'fatal' || level === 'panic') {
       errors = [...errors.slice(-19), { at: Date.now(), text: text.trim() }];

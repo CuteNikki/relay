@@ -10,9 +10,10 @@ import {
 } from './src/config';
 import { DESTINATIONS, idle, type Destination } from './src/destinations';
 import { relay } from './src/ffmpeg';
+import { INPUTS, reset, type Input } from './src/inputs';
 import { log } from './src/log';
 import { quietBeforeLeaving, streamIsIn } from './src/mediamtx';
-import { stream, writeStatus } from './src/status';
+import { writeStatus } from './src/status';
 
 let stopping = false;
 // How long FFmpeg is given to close its streams when the relay stops,
@@ -33,51 +34,61 @@ const seconds = (ms: number) =>
     : `${Math.round(ms / 60_000)} min`;
 
 /**
- * Ends the stream on every platform: each FFmpeg is stopped as Ctrl+C would,
- * so the platforms see the stream end rather than drop. Without the fallback,
- * they're ending anyway, as what they read from MediaMTX has.
+ * Ends one of OBS's streams on every platform that gets it: each FFmpeg is
+ * stopped as Ctrl+C would, so the platforms see the stream end rather than
+ * drop. Without the fallback, they're ending anyway, as what they read from
+ * MediaMTX has.
  */
-function end(text: string) {
-  stream.live = false;
-  stream.since = undefined;
-  stream.fallbackSince = undefined;
-  stream.input = {};
-  for (const d of DESTINATIONS) d.ffmpeg?.kill('SIGINT');
-  log.info(`${text} ${WAITING}`);
+function end(input: Input, text: string) {
+  reset(input);
+  for (const d of DESTINATIONS) {
+    if (d.input === input) d.ffmpeg?.kill('SIGINT');
+  }
+  input.log.info(`${text} ${WAITING}`);
   writeStatus(true);
 }
 
 /**
- * Asks MediaMTX the whole time whether a stream is coming in, and while one
- * is, sees that every platform is being sent it.
+ * Asks MediaMTX the whole time whether each of OBS's streams is coming in,
+ * and while one is, sees that every platform that gets it is being sent it.
  */
 async function watch() {
   log.info(
-    `📤 Sends to ${DESTINATIONS.map((d) => `${d.out.name} (${d.out.sends})`).join(', ')}`,
+    `📤 Sends to ${DESTINATIONS.map((d) => `${d.out.name} (${d.out.sends}${INPUTS.length > 1 ? `, ${d.input.label.toLowerCase()}` : ''})`).join(', ')}`,
   );
   log.info(`📡 ${WAITING}`);
   while (!stopping) {
-    const online = await streamIsIn();
-    if (online && !stream.live) {
-      stream.live = true;
-      stream.since = Date.now();
-      log.info('🔴 A stream came in, sending it on');
-      writeStatus(true);
-    } else if (online && stream.fallbackSince) {
-      log.info(
-        `🟢 OBS is back after ${seconds(Date.now() - stream.fallbackSince)}, sending it on again`,
-      );
-      stream.fallbackSince = undefined;
-      writeStatus(true);
-    } else if (!online && stream.live) {
-      gone();
-    }
-    // Every time, not only when it came in, so a platform whose FFmpeg gave
-    // up as the stream went and came back quickly is started again
-    if (stream.live) for (const d of DESTINATIONS) if (!d.running) void send(d);
+    // Each on its own: one going is nothing to the other
+    await Promise.all(INPUTS.map(look));
     // Every couple of seconds at most, and at once when something's changed
     writeStatus();
     await Bun.sleep(WAIT_MS);
+  }
+}
+
+/** One look at one of OBS's streams, and what to do about what's changed. */
+async function look(input: Input) {
+  const online = await streamIsIn(input);
+  if (online && !input.live) {
+    input.live = true;
+    input.since = Date.now();
+    input.log.info('🔴 A stream came in, sending it on');
+    writeStatus(true);
+  } else if (online && input.fallbackSince) {
+    input.log.info(
+      `🟢 OBS is back after ${seconds(Date.now() - input.fallbackSince)}, sending it on again`,
+    );
+    input.fallbackSince = undefined;
+    writeStatus(true);
+  } else if (!online && input.live) {
+    gone(input);
+  }
+  // Every time, not only when it came in, so a platform whose FFmpeg gave
+  // up as the stream went and came back quickly is started again
+  if (input.live) {
+    for (const d of DESTINATIONS) {
+      if (d.input === input && !d.running) void send(d);
+    }
   }
 }
 
@@ -86,21 +97,22 @@ async function watch() {
  * purpose, end the stream; if it dropped out, let MediaMTX's clip play in its
  * place, for as long as FALLBACK_FOR, and end the stream after that.
  */
-function gone() {
-  if (!FALLBACK) return end('📡 The stream ended.');
-  if (stream.fallbackSince) {
-    if (Date.now() - stream.fallbackSince >= FALLBACK_FOR_MS) {
+function gone(input: Input) {
+  if (!FALLBACK) return end(input, '📡 The stream ended.');
+  if (input.fallbackSince) {
+    if (Date.now() - input.fallbackSince >= FALLBACK_FOR_MS) {
       end(
+        input,
         `⌛ OBS didn't come back within ${seconds(FALLBACK_FOR_MS)}, so the stream has ended.`,
       );
     }
     return;
   }
-  const quiet = quietBeforeLeaving();
-  if (quiet < DROPPED_MS) return end('📡 OBS stopped streaming.');
-  stream.fallbackSince = Date.now();
+  const quiet = quietBeforeLeaving(input);
+  if (quiet < DROPPED_MS) return end(input, '📡 OBS stopped streaming.');
+  input.fallbackSince = Date.now();
   writeStatus(true);
-  log.warn(
+  input.log.warn(
     `📴 OBS dropped out, having sent nothing for ${seconds(quiet)}: showing the fallback for up to ${seconds(FALLBACK_FOR_MS)}`,
   );
 }
@@ -114,13 +126,13 @@ function gone() {
 async function send(d: Destination) {
   d.running = true;
   let delay = RETRY_MIN_MS;
-  while (stream.live && !stopping) {
+  while (d.input.live && !stopping) {
     const started = Date.now();
     const { how, why } = await relay(d);
     // Its input ending is the stream ending, not a failure. With the
     // fallback, its input never ends: the stream has ended when end() says.
-    if (stopping || !stream.live) break;
-    if (!FALLBACK && !(await streamIsIn())) break;
+    if (stopping || !d.input.live) break;
+    if (!FALLBACK && !(await streamIsIn(d.input))) break;
     if (Date.now() - started > STABLE_MS) delay = RETRY_MIN_MS;
     d.out.state = 'retrying';
     d.out.retries++;
@@ -133,7 +145,7 @@ async function send(d: Destination) {
     await Bun.sleep(delay);
     delay = Math.min(delay * 2, RETRY_MAX_MS);
   }
-  d.out = idle(d.out.name, d.out.sends);
+  d.out = idle(d.out);
   d.running = false;
   writeStatus(true);
 }
@@ -159,11 +171,8 @@ async function stop(signal: string) {
     }
   }
   // Offline, for the dashboard, rather than live until it goes stale
-  stream.live = false;
-  stream.since = undefined;
-  stream.fallbackSince = undefined;
-  stream.input = {};
-  for (const d of DESTINATIONS) d.out = idle(d.out.name, d.out.sends);
+  for (const input of INPUTS) reset(input);
+  for (const d of DESTINATIONS) d.out = idle(d.out);
   writeStatus(true);
   process.exit(0);
 }

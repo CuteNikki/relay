@@ -13,20 +13,23 @@ services:
       # Letters, digits and _ are safest: MediaMTX refuses some characters, such
       # as /, and won't start, and in OBS's stream key + would read as a space
       MTX_AUTHINTERNALUSERS_0_PASS: ${INBOUND_STREAM_KEY:?Set INBOUND_STREAM_KEY in .env}
-      # Recording what comes in, if asked, and for how long it's kept
-      MTX_PATHS_LIVE_RECORD: ${RECORD:-false}
-      MTX_PATHS_LIVE_RECORDDELETEAFTER: ${RECORD_KEEP:-7d}
-      # Encrypting what OBS sends by SRT, if a passphrase is set
-      MTX_PATHS_LIVE_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:-}
-      # A clip in OBS's place while it's dropped out, if asked, and which
-      MTX_PATHS_LIVE_ALWAYSAVAILABLE: ${FALLBACK:-false}
+      # For both of OBS's streams: recording what comes in, if asked, and
+      # for how long it's kept; encrypting what OBS sends by SRT, if a
+      # passphrase is set; and a clip in OBS's place while it's dropped out,
+      # if asked
+      MTX_PATHDEFAULTS_RECORD: ${RECORD:-false}
+      MTX_PATHDEFAULTS_RECORDDELETEAFTER: ${RECORD_KEEP:-7d}
+      MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:-}
+      MTX_PATHDEFAULTS_ALWAYSAVAILABLE: ${FALLBACK:-false}
+      # Which clip, for each
       MTX_PATHS_LIVE_ALWAYSAVAILABLEFILE: /fallback/${FALLBACK_FILE:-be-right-back.mp4}
+      MTX_PATHS_VERTICAL_ALWAYSAVAILABLEFILE: /fallback/${FALLBACK_VERTICAL_FILE:-be-right-back-vertical.mp4}
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
       - ./recordings:/recordings
       - ./fallback:/fallback:ro
 
-  # Reads it back and sends it on to YouTube and Twitch
+  # Reads it back and sends it on to YouTube, Twitch and the rest
   rtmp-relay:
     build: .
     container_name: rtmp-relay

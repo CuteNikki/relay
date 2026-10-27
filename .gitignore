@@ -39,3 +39,4 @@ recordings
 # your own fallback clip, if any: only the one that comes with it is kept
 fallback/*
 !fallback/be-right-back.mp4
+!fallback/be-right-back-vertical.mp4

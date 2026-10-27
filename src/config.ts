@@ -14,15 +14,24 @@ if (!inboundKey) fail('Set INBOUND_STREAM_KEY in .env: OBS streams with it');
 export const INBOUND_KEY = inboundKey;
 
 /**
- * Somewhere the stream goes: an RTMP or RTMPS server, the key it takes, and,
- * if it's re-encoded rather than sent as it comes in, at what resolution and
- * bitrate, and with which of x264's presets. Without a resolution, it keeps
- * the size it comes in at.
+ * The streams OBS can send: the usual landscape one, and a vertical one for
+ * platforms that want 9:16, such as YouTube Shorts and TikTok, which OBS
+ * sends as a second stream of its own
+ */
+export const INPUT_NAMES = ['landscape', 'vertical'] as const;
+export type InputName = (typeof INPUT_NAMES)[number];
+
+/**
+ * Somewhere the stream goes: an RTMP or RTMPS server, the key it takes,
+ * which of OBS's streams it gets, and, if it's re-encoded rather than sent
+ * as it comes in, at what resolution and bitrate, and with which of x264's
+ * presets. Without a resolution, it keeps the size it comes in at.
  */
 export type OutputSettings = {
   name: string;
   url: string;
   key: string;
+  input: InputName;
   encode?: { resolution?: string; bitrate: string; preset: string };
 };
 
@@ -88,7 +97,15 @@ const outputs: OutputSettings[] = [];
 
 // Where it sends, as OUTPUT_1_URL, OUTPUT_1_KEY and so on, numbered however
 // suits, in the order of their numbers
-const PARTS = ['NAME', 'URL', 'KEY', 'RESOLUTION', 'BITRATE', 'PRESET'];
+const PARTS = [
+  'NAME',
+  'URL',
+  'KEY',
+  'INPUT',
+  'RESOLUTION',
+  'BITRATE',
+  'PRESET',
+];
 const numbers = new Set<number>();
 for (const name of Object.keys(Bun.env)) {
   const [, n, part] = name.match(/^OUTPUT_(\d+)_(.+)$/) ?? [];
@@ -113,6 +130,12 @@ for (const n of [...numbers].sort((a, b) => a - b)) {
   const size = resolution(`OUTPUT_${n}_RESOLUTION`, part('RESOLUTION'));
   const rate = bitrate(`OUTPUT_${n}_BITRATE`, part('BITRATE'));
   const speed = preset(`OUTPUT_${n}_PRESET`, part('PRESET'));
+  const input = part('INPUT') ?? 'landscape';
+  if (!INPUT_NAMES.includes(input as InputName)) {
+    fail(
+      `OUTPUT_${n}_INPUT should be ${INPUT_NAMES.join(' or ')}, not ${input}`,
+    );
+  }
   // Left out until it has a key, as a platform in .env.example is that's
   // not been filled in
   const key = part('KEY');
@@ -124,6 +147,7 @@ for (const n of [...numbers].sort((a, b) => a - b)) {
     name,
     url: address,
     key,
+    input: input as InputName,
     // Re-encoded if any of them is set, at 6000 kb/s and superfast unless said
     encode:
       size || rate || speed
@@ -151,12 +175,9 @@ export const OUTPUTS = outputs;
 
 // MediaMTX, which OBS streams to, and which takes a stream only with
 // INBOUND_STREAM_KEY as its password; the relay reads it back from there
-const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
+export const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
 export const PASS = encodeURIComponent(INBOUND_KEY);
 hideInLogs(INBOUND_KEY, PASS, ...OUTPUTS.map((o) => o.key));
-export const INPUT_URL = `rtmp://${RTMP_SERVER}:1935/live?user=relay&pass=${PASS}`;
-// Its API, which says when a stream has come in
-export const STREAM_API = `http://${RTMP_SERVER}:9997/v3/paths/get/live`;
 
 // What the dashboard reads to show whether the stream is live
 export const STATUS_FILE = setting('STATUS_FILE') ?? '/tmp/relay/status.json';
@@ -202,32 +223,33 @@ export const FALLBACK_FOR_MS = duration(
   setting('FALLBACK_FOR') ?? '5m',
 );
 
-// The clip, checked here as MediaMTX won't start without it, taking RTMP and
-// SRT down too, and turns OBS away, without a word, unless OBS sends what
-// the clip is made of; OBS sends H.264, and AAC at 48 kHz in stereo, unless
-// told otherwise
+// The clips, one for each of OBS's streams, checked here as MediaMTX won't
+// start without them, taking RTMP and SRT down too, and turns OBS away,
+// without a word, unless OBS sends what the clip is made of; OBS sends
+// H.264, and AAC at 48 kHz in stereo, unless told otherwise
 const FALLBACK_DIR = setting('FALLBACK_DIR') ?? '/fallback';
-if (FALLBACK) {
-  const file = setting('FALLBACK_FILE') ?? 'be-right-back.mp4';
+function checkClip(name: string, file: string, vertical: boolean) {
   const probe = Bun.spawnSync([
     'ffprobe',
     '-v',
     'error',
     '-show_entries',
-    'stream=codec_type,codec_name,sample_rate,channels',
+    'stream=codec_type,codec_name,width,height,sample_rate,channels',
     '-of',
     'json',
     `${FALLBACK_DIR}/${file}`,
   ]);
   if (probe.exitCode !== 0) {
     fail(
-      `FALLBACK_FILE ${file} isn't a video in ./fallback that can be read (${probe.stderr.toString().trim()}): MediaMTX won't start without it`,
+      `${name} ${file} isn't a video in ./fallback that can be read (${probe.stderr.toString().trim()}): MediaMTX won't start without it`,
     );
   }
   const { streams = [] } = JSON.parse(probe.stdout.toString()) as {
     streams?: {
       codec_type: string;
       codec_name: string;
+      width?: number;
+      height?: number;
       sample_rate?: string;
       channels?: number;
     }[];
@@ -241,7 +263,26 @@ if (FALLBACK) {
     audio.channels !== 2
   ) {
     fail(
-      `FALLBACK_FILE ${file} should be H.264 video with AAC audio at 48 kHz in stereo, as OBS sends, or MediaMTX turns OBS away: it's ${video?.codec_name ?? 'no'} video and ${audio ? `${audio.codec_name} audio at ${audio.sample_rate} Hz in ${audio.channels} channels` : 'no audio'}`,
+      `${name} ${file} should be H.264 video with AAC audio at 48 kHz in stereo, as OBS sends, or MediaMTX turns OBS away: it's ${video?.codec_name ?? 'no'} video and ${audio ? `${audio.codec_name} audio at ${audio.sample_rate} Hz in ${audio.channels} channels` : 'no audio'}`,
     );
   }
+  // Works either way, but looks wrong on the platform
+  const { width = 0, height = 0 } = video;
+  if (vertical ? width > height : height > width) {
+    log.warn(
+      `⚠️ ${name} ${file} is ${width}x${height}, where ${vertical ? 'a vertical' : 'a landscape'} clip is wanted`,
+    );
+  }
+}
+if (FALLBACK) {
+  checkClip(
+    'FALLBACK_FILE',
+    setting('FALLBACK_FILE') ?? 'be-right-back.mp4',
+    false,
+  );
+  checkClip(
+    'FALLBACK_VERTICAL_FILE',
+    setting('FALLBACK_VERTICAL_FILE') ?? 'be-right-back-vertical.mp4',
+    true,
+  );
 }

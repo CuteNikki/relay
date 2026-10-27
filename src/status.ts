@@ -1,8 +1,9 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { STATUS_EVERY_MS, STATUS_FILE } from './config';
+import { STATUS_EVERY_MS, STATUS_FILE, type InputName } from './config';
 import { DESTINATIONS } from './destinations';
+import { INPUTS, type Input } from './inputs';
 import { log } from './log';
 import { mediamtxProblem } from './mediamtx';
 
@@ -11,6 +12,8 @@ export type Output = {
   name: string;
   /** What it gets, e.g. "as it comes in" or "1080p at 6000 kb/s" */
   sends: string;
+  /** Which of OBS's streams it gets */
+  input: InputName;
   /**
    * Waiting for a stream; connecting to the platform; sending to it; or,
    * after FFmpeg failed while the stream was still coming in, waiting to
@@ -31,7 +34,25 @@ export type Output = {
   lastError?: string;
 };
 
+/** How one of OBS's streams is doing */
+export type InputStatus = {
+  name: InputName;
+  live: boolean;
+  /** When it came in, in milliseconds since 1970 */
+  since?: number;
+  /** What comes in, e.g. "h264, 2560x1440, 60 fps" and "aac, 48000 Hz, stereo" */
+  media: { video?: string; audio?: string };
+  /**
+   * Since when OBS has been gone and the fallback clip has been playing in
+   * its place, while it is, in milliseconds since 1970
+   */
+  fallbackSince?: number;
+};
+
 export type Status = {
+  // OBS's streams taken together, as when there was only one: the
+  // landscape stream's, or the vertical one's when it's the only one live
+  /** Whether any is live */
   live: boolean;
   /** When the stream came in, in milliseconds since 1970 */
   since?: number;
@@ -42,6 +63,8 @@ export type Status = {
    * its place, while it is, in milliseconds since 1970
    */
   fallbackSince?: number;
+  /** Each of OBS's streams that some output wants, landscape first */
+  inputs: InputStatus[];
   // The outputs sending, taken together, as when one FFmpeg sent to them all
   /** The slowest one's */
   fps?: number;
@@ -61,14 +84,14 @@ export type Status = {
   updatedAt: number;
 };
 
-// Whether a stream is coming in, by MediaMTX, since when, and what it is
-export const stream: Pick<
-  Status,
-  'live' | 'since' | 'input' | 'fallbackSince'
-> = {
-  live: false,
-  input: {},
-};
+const inputStatus = (i: Input): InputStatus => ({
+  name: i.name,
+  live: i.live,
+  since: i.since,
+  media: i.media,
+  fallbackSince: i.fallbackSince,
+});
+
 let lastWrite = 0;
 // Whether the last write failed, so a status that can't be written is said
 // once, and once more when it can again, rather than every 2 seconds
@@ -80,8 +103,13 @@ export function writeStatus(force = false) {
   if (!force && now - lastWrite < STATUS_EVERY_MS) return;
   lastWrite = now;
   const outputs = DESTINATIONS.map((d) => d.out);
+  const main = INPUTS.find((i) => i.live) ?? INPUTS[0]!;
   const status: Status = {
-    ...stream,
+    live: main.live,
+    since: main.since,
+    input: main.media,
+    fallbackSince: main.fallbackSince,
+    inputs: INPUTS.map(inputStatus),
     ...together(outputs.filter((o) => o.state === 'live')),
     outputs,
     problems: [mediamtxProblem()].filter((p): p is string => !!p),

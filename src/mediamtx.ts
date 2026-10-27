@@ -1,4 +1,5 @@
-import { INBOUND_KEY, STREAM_API } from './config';
+import { INBOUND_KEY } from './config';
+import type { Input } from './inputs';
 import { log } from './log';
 
 // How long to wait for MediaMTX's answer. After a wrong password it holds
@@ -20,11 +21,6 @@ function trouble(level: 'warn' | 'error', text: string) {
   problem = text;
 }
 
-// When OBS last sent anything, by the bytes MediaMTX says it's had, counted
-// only while OBS is there: with the fallback, MediaMTX's own clip comes in
-// after it's gone
-let inbound = { bytes: -1, at: 0 };
-
 /**
  * How long nothing had come from OBS before it went, to tell stopping on
  * purpose from dropping out: OBS stopping sends right up to the end, while a
@@ -32,8 +28,8 @@ let inbound = { bytes: -1, at: 0 };
  * seconds later: 5, its readTimeout, less over SRT, whose buffer keeps
  * coming in for a couple of seconds after OBS has gone.
  */
-export function quietBeforeLeaving() {
-  return Date.now() - inbound.at;
+export function quietBeforeLeaving(input: Input) {
+  return Date.now() - input.inbound.at;
 }
 
 /** What's wrong with MediaMTX, if anything, for the status and the health check. */
@@ -48,17 +44,17 @@ function fine() {
 }
 
 /** Whether OBS is streaming to MediaMTX, by its API: until it is, there's no such path. */
-export async function streamIsIn() {
+export async function streamIsIn(input: Input) {
   let res: Response;
   try {
-    res = await fetch(STREAM_API, {
+    res = await fetch(input.api, {
       headers: { Authorization: `Basic ${btoa(`relay:${INBOUND_KEY}`)}` },
       signal: AbortSignal.timeout(ANSWER_MS),
     });
   } catch (error) {
     unreachableSince ??= Date.now();
     if (Date.now() - unreachableSince >= UNREACHABLE_MS) {
-      trouble('warn', `MediaMTX isn't answering at ${STREAM_API}: ${error}`);
+      trouble('warn', `MediaMTX isn't answering at ${input.api}: ${error}`);
     }
     return false;
   }
@@ -77,7 +73,7 @@ export async function streamIsIn() {
     return false;
   }
   if (!res.ok) {
-    trouble('warn', `MediaMTX answered HTTP ${res.status} at ${STREAM_API}`);
+    trouble('warn', `MediaMTX answered HTTP ${res.status} at ${input.api}`);
     return false;
   }
   try {
@@ -89,8 +85,12 @@ export async function streamIsIn() {
     };
     fine();
     const online = path.online === true;
+    // Counted only while OBS is there: with the fallback, MediaMTX's own clip
+    // comes in after it's gone
     const bytes = path.inboundBytes ?? path.bytesReceived ?? 0;
-    if (online && bytes !== inbound.bytes) inbound = { bytes, at: Date.now() };
+    if (online && bytes !== input.inbound.bytes) {
+      input.inbound = { bytes, at: Date.now() };
+    }
     return online;
   } catch (error) {
     trouble(
