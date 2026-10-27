@@ -7,33 +7,25 @@ import {
 } from './config';
 import { log, type Logger } from './log';
 
-/**
- * One of the streams OBS sends, as MediaMTX has it: whether it's coming in,
- * since when, and what it is. Each comes and goes on its own, so a vertical
- * stream can start after the landscape one, or not at all.
- */
+/** One of OBS's streams, as MediaMTX has it. Each comes and goes on its own. */
 export type Input = {
   name: InputName;
-  /** How it's called in the logs and the status: "Landscape", "Vertical" */
+  /** "Landscape" or "Vertical", in the logs */
   label: string;
-  /** Its path in MediaMTX, which OBS streams to: "live", "vertical" */
+  /** Its path in MediaMTX, which OBS streams to */
   path: string;
-  /** Where FFmpeg reads it back from */
+  /** Where FFmpeg reads it from */
   url: string;
-  /** MediaMTX's API for it, which says when it's come in */
+  /** MediaMTX's API for the path */
   api: string;
   log: Logger;
   live: boolean;
-  /** When it came in, in milliseconds since 1970 */
   since?: number;
-  /** What comes in, e.g. "h264, 2560x1440, 60 fps" and "aac, 48000 Hz, stereo" */
+  /** e.g. "h264, 2560x1440, 60 fps" and "aac, 48000 Hz, stereo" */
   media: { video?: string; audio?: string };
-  /** Since when OBS has been gone and the fallback clip has played in its place */
+  /** Since when the fallback clip has played in OBS's place */
   fallbackSince?: number;
-  /**
-   * When OBS last sent anything, by the bytes MediaMTX says it's had, to
-   * tell OBS stopping from its dropping out
-   */
+  /** When MediaMTX last had a byte from OBS, to tell stopping from dropping out */
   inbound: { bytes: number; at: number };
 };
 
@@ -48,7 +40,7 @@ const LABELS: Record<InputName, string> = {
   vertical: 'Vertical',
 };
 
-/** Only the streams some output wants: with no vertical output, there's no need to watch for one */
+// Only the streams some output wants
 const names = INPUT_NAMES.filter((name) =>
   OUTPUTS.some((o) => o.input === name),
 );
@@ -61,7 +53,7 @@ export const INPUTS: Input[] = names.map((name) => {
     path,
     url: `rtmp://${RTMP_SERVER}:1935/${path}?user=relay&pass=${PASS}`,
     api: `http://${RTMP_SERVER}:9997/v3/paths/get/${path}`,
-    // Which stream a line is about, but only once there's more than one
+    // Says which stream a line is about once there's more than one
     log: names.length > 1 ? log.for(LABELS[name]) : log,
     live: false,
     media: {},
@@ -73,7 +65,7 @@ export function inputFor(name: InputName) {
   return INPUTS.find((i) => i.name === name)!;
 }
 
-/** Back to waiting for OBS, as when it's not streaming */
+/** Back to waiting for OBS */
 export function reset(input: Input) {
   input.live = false;
   input.since = undefined;

@@ -12,18 +12,16 @@ import { DESTINATIONS, idle, type Destination } from './src/destinations';
 import { relay } from './src/ffmpeg';
 import { INPUTS, reset, type Input } from './src/inputs';
 import { log } from './src/log';
-import { quietBeforeLeaving, streamIsIn } from './src/mediamtx';
+import { streamIsIn } from './src/mediamtx';
 import { writeStatus } from './src/status';
 
 let stopping = false;
-// How long FFmpeg is given to close its streams when the relay stops,
-// within Docker's 10 seconds before it kills the container
+// How long FFmpeg gets to end its streams on shutdown, within Docker's 10 s
 const STOP_MS = 5000;
-// OBS going quiet for longer than this before it went means it dropped out:
-// stopping on purpose sends right up to the end, so it's quiet for at most
-// two of the relay's looks at MediaMTX, a quarter of a second apart, where a
-// dropped connection is quiet for the 5 seconds MediaMTX waits before giving
-// up on it, less what SRT's buffer still had to give: 3 with OBS's 2
+// How long OBS must have sent nothing before it went to count as dropped out.
+// Stopping on purpose sends right up to the end, so it's quiet for a look or
+// two at most; a dropped connection is quiet for MediaMTX's 5 s readTimeout,
+// less the couple of seconds SRT's buffer keeps coming in: about 3 s.
 const DROPPED_MS = 1500;
 const WAITING = 'Waiting for a stream on port 1936 (RTMP) or 8890 (SRT)...';
 
@@ -34,10 +32,8 @@ const seconds = (ms: number) =>
     : `${Math.round(ms / 60_000)} min`;
 
 /**
- * Ends one of OBS's streams on every platform that gets it: each FFmpeg is
- * stopped as Ctrl+C would, so the platforms see the stream end rather than
- * drop. Without the fallback, they're ending anyway, as what they read from
- * MediaMTX has.
+ * Ends one of OBS's streams on every platform that gets it. SIGINT lets
+ * FFmpeg end it properly, so the platforms see it end rather than drop.
  */
 function end(input: Input, text: string) {
   reset(input);
@@ -54,23 +50,18 @@ function describe({ out, input }: Destination) {
   return `${out.name} (${out.sends}${which})`;
 }
 
-/**
- * Asks MediaMTX the whole time whether each of OBS's streams is coming in,
- * and while one is, sees that every platform that gets it is being sent it.
- */
+/** The main loop: looks at each of OBS's streams every WAIT_MS. */
 async function watch() {
   log.info(`📤 Sends to ${DESTINATIONS.map(describe).join(', ')}`);
   log.info(`📡 ${WAITING}`);
   while (!stopping) {
-    // Each on its own: one going is nothing to the other
     await Promise.all(INPUTS.map(look));
-    // Every couple of seconds at most, and at once when something's changed
     writeStatus();
     await Bun.sleep(WAIT_MS);
   }
 }
 
-/** One look at one of OBS's streams, and what to do about what's changed. */
+/** One look at one of OBS's streams, acting on what's changed. */
 async function look(input: Input) {
   const online = await streamIsIn(input);
   if (online && !input.live) {
@@ -87,8 +78,8 @@ async function look(input: Input) {
   } else if (!online && input.live) {
     gone(input);
   }
-  // Every time, not only when it came in, so a platform whose FFmpeg gave
-  // up as the stream went and came back quickly is started again
+  // On every look, not only when it came in, so a platform whose FFmpeg gave
+  // up as the stream blipped is started again
   if (input.live) {
     for (const destination of DESTINATIONS) {
       if (destination.input === input && !destination.running) {
@@ -99,9 +90,8 @@ async function look(input: Input) {
 }
 
 /**
- * What to do with OBS gone: without the fallback, or if it stopped on
- * purpose, end the stream; if it dropped out, let MediaMTX's clip play in its
- * place, for as long as FALLBACK_FOR, and end the stream after that.
+ * OBS has gone: end the stream if it stopped on purpose, or if it dropped out,
+ * show the fallback for up to FALLBACK_FOR.
  */
 function gone(input: Input) {
   if (!FALLBACK) return end(input, '📡 The stream ended.');
@@ -114,7 +104,7 @@ function gone(input: Input) {
     }
     return;
   }
-  const quiet = quietBeforeLeaving(input);
+  const quiet = Date.now() - input.inbound.at;
   if (quiet < DROPPED_MS) return end(input, '📡 OBS stopped streaming.');
   input.fallbackSince = Date.now();
   writeStatus(true);
@@ -124,10 +114,9 @@ function gone(input: Input) {
 }
 
 /**
- * Sends the stream to one platform for as long as it comes in. Each has its
- * own FFmpeg, so one platform failing, say Twitch turning the key away or
- * its server dropping out, leaves the others going; FFmpeg is started again
- * by itself, waiting longer each time it fails in a row.
+ * Keeps one platform's FFmpeg running while its stream is live, retrying with
+ * a growing delay. Each platform has its own, so one failing leaves the
+ * others going.
  */
 async function send(destination: Destination) {
   destination.running = true;
@@ -135,8 +124,8 @@ async function send(destination: Destination) {
   while (destination.input.live && !stopping) {
     const started = Date.now();
     const { how, why } = await relay(destination);
-    // Its input ending is the stream ending, not a failure. With the
-    // fallback, its input never ends: the stream has ended when end() says.
+    // The stream ending isn't a failure. With the fallback, FFmpeg's input
+    // never ends, so it's over only when end() says.
     if (stopping || !destination.input.live) break;
     if (!FALLBACK && !(await streamIsIn(destination.input))) break;
     if (Date.now() - started > STABLE_MS) delay = RETRY_MIN_MS;
@@ -156,10 +145,7 @@ async function send(destination: Destination) {
   writeStatus(true);
 }
 
-/**
- * Stops each FFmpeg as Ctrl+C would, so it ends its streams properly and the
- * platforms see them end rather than drop, killing any that don't in time.
- */
+/** Lets each FFmpeg end its streams properly, killing any that take too long. */
 async function stop(signal: string) {
   if (stopping) return;
   stopping = true;
@@ -190,8 +176,7 @@ async function stop(signal: string) {
 process.on('SIGINT', () => void stop('SIGINT'));
 process.on('SIGTERM', () => void stop('SIGTERM'));
 
-// Something the relay didn't see coming: said in full, then exiting, for
-// Docker to start it again, rather than going on in a state nobody knows
+/** Logs what went unexpectedly wrong and exits, for Docker to restart it clean. */
 function crash(error: unknown) {
   log.error(
     `💥 The relay crashed: ${error instanceof Error ? error.stack : error}`,

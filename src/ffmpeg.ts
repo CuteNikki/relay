@@ -6,9 +6,8 @@ import type { Destination } from './destinations';
 import { hide, log, logRepeating, type Level } from './log';
 import { writeStatus } from './status';
 
-// How much what FFmpeg says matters to the relay. Its errors are warnings
-// here, since the relay deals with them by starting it again, and says so;
-// what it says as a matter of course, its settings and the like, is debug.
+// FFmpeg's errors are only warnings here, since the relay starts it again;
+// anything not listed, its routine chatter, is debug
 const FFMPEG_LEVELS: Record<string, Level> = {
   panic: 'warn',
   fatal: 'warn',
@@ -32,7 +31,10 @@ function describeAudio(line: string) {
   return [codec, rate, layout].filter(Boolean).join(', ');
 }
 
-/** Runs one platform's FFmpeg until it exits, and says how and why. */
+/**
+ * Runs one platform's FFmpeg until it exits, with how ("code 1", "signal
+ * SIGKILL") and why, if it said.
+ */
 export function relay(destination: Destination) {
   const { out } = destination;
   const platformLog = log.for(out.name);
@@ -48,12 +50,10 @@ export function relay(destination: Destination) {
 
   const ffmpeg = spawn('ffmpeg', [
     '-hide_banner',
-    // Each line with how much it matters, "[info]", "[error]" and so on,
-    // for the relay to log it as that
+    // "[info]", "[error]" and so on, to log each line at its level
     '-loglevel',
     'level+info',
-    // Its progress as key=value lines on stdout, for the status, in place
-    // of the line it would otherwise keep rewriting in the logs
+    // Progress as key=value lines on stdout, not a stats line in the logs
     '-nostats',
     '-progress',
     'pipe:1',
@@ -63,15 +63,13 @@ export function relay(destination: Destination) {
   ]);
   destination.ffmpeg = ffmpeg;
 
-  // What it says about the stream: the input's streams come under
-  // "Input #0", the outputs' under "Output #…"
+  // Which part of FFmpeg's description it's on: "Input #0" or "Output #…"
   let section: 'input' | 'output' | undefined;
-  // What it complained of, for the status and the logs should it fail
+  // To say why, should it fail
   let errors: { at: number; text: string }[] = [];
   let complaint: string | undefined;
   createInterface({ input: ffmpeg.stderr! }).on('line', (line) => {
-    // "[out#0/flv @ 0x…] [fatal] Error opening output …": who said it, if
-    // anyone in particular, how much it matters, and what
+    // "[out#0/flv @ 0x…] [fatal] Error opening output …"
     const [, who = '', level = 'info', text = line] =
       line.match(/^(\[[^\]]+ @ [^\]]+\] )?\[(\w+)\] (.*)$/) ?? [];
     logRepeating(platformLog, FFMPEG_LEVELS[level] ?? 'debug', `${who}${text}`);
@@ -96,9 +94,8 @@ export function relay(destination: Destination) {
   });
 
   // FFmpeg's own fps, bitrate and speed are averages since it started, which
-  // hide a drop an hour in, so they're worked out here instead, from what
-  // was sent since the last sample, taken every couple of seconds: frames,
-  // bytes, and how far into the stream it got
+  // hide a drop an hour in, so they're worked out here over each
+  // STATUS_EVERY_MS instead
   let frames = 0;
   let bytes = 0;
   let outTimeUs = 0;
@@ -106,9 +103,8 @@ export function relay(destination: Destination) {
     | { frames: number; bytes: number; outTimeUs: number; at: number }
     | undefined;
 
-  // Its progress, a block of key=value lines ending in "progress=…". The
-  // first comes once it's connected to the platform and sending. Before
-  // then, sizes and times can be N/A, which are kept as they were.
+  // Blocks of key=value lines ending in "progress=…", the first once it's
+  // sending. Values can be N/A before then, which keep the last one.
   const number = (value = '', was: number) =>
     Number.isFinite(Number(value)) ? Number(value) : was;
   createInterface({ input: ffmpeg.stdout! }).on('line', (line) => {
@@ -142,10 +138,8 @@ export function relay(destination: Destination) {
     }
   });
 
-  // FFmpeg can hang rather than exit when a platform goes away (8.1 sent
-  // nothing for minutes on end when Twitch's server did), so one that sends
-  // no new frame for STALL_MS, connecting or not, is stopped, and send()
-  // starts it again
+  // FFmpeg 8.1 can hang rather than exit when a platform goes away, so one
+  // that sends no new frame for STALL_MS is killed, for send() to restart
   let lastFrame = { frames: 0, at: Date.now() };
   const watchdog = setInterval(() => {
     if (frames > lastFrame.frames) lastFrame = { frames, at: Date.now() };
@@ -157,14 +151,12 @@ export function relay(destination: Destination) {
     }
   }, 1000);
 
-  /** How it exited, e.g. "code 1" or "signal SIGKILL", and why, if it said */
   return new Promise<{ how: string; why?: string }>((resolve) => {
     ffmpeg.on('close', (code, signal) => {
       clearInterval(watchdog);
       const how = signal ? `signal ${signal}` : `code ${code}`;
-      // The first error of the last few seconds before it exited, which says
-      // why, where the last says only that it gave up: "Connection refused"
-      // rather than "Error opening output files"
+      // The first of its last errors says why ("Connection refused"); the
+      // last only says it gave up ("Error opening output files")
       const exitedAt = Date.now();
       const said = errors.find((e) => e.at >= exitedAt - 5000)?.text;
       const reason = complaint ?? said;

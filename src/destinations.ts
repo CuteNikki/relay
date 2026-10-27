@@ -4,11 +4,7 @@ import { OUTPUTS, type OutputSettings } from './config';
 import { inputFor } from './inputs';
 import type { Output } from './status';
 
-/**
- * What it gets, as people say it: "as it comes in", "1080p at 6000 kb/s" or
- * "at 6000 kb/s", and the preset if it's not the usual superfast, as
- * "1080p at 6000 kb/s, veryfast"
- */
+/** "as it comes in", "1080p at 6000 kb/s", or "at 6000 kb/s, veryfast" when it isn't superfast */
 function describe({ encode }: OutputSettings) {
   if (!encode) return 'as it comes in';
   const rate = encode.bitrate.replace(/k$/, ' kb/s');
@@ -18,11 +14,7 @@ function describe({ encode }: OutputSettings) {
   return encode.preset === 'superfast' ? what : `${what}, ${encode.preset}`;
 }
 
-/**
- * FFmpeg's arguments to send the stream to one output: copied untouched,
- * which costs almost no CPU, or re-encoded at its resolution and bitrate,
- * with its preset.
- */
+/** FFmpeg's output arguments: copied as it comes in, at almost no CPU, or re-encoded. */
 function args({ url, key, encode }: OutputSettings) {
   const codecs = encode
     ? [
@@ -30,10 +22,8 @@ function args({ url, key, encode }: OutputSettings) {
         'libx264',
         '-preset',
         encode.preset,
-        // A keyframe every 2 seconds, as Twitch and most others ask,
-        // whatever the frame rate: a fixed -g 120 was 2 s at 60 fps but 4 s
-        // at 30. Scene cuts add none of their own, so they stay evenly
-        // spaced.
+        // A keyframe every 2 s, as Twitch and most others ask, whatever the
+        // frame rate, and none extra on scene cuts
         '-force_key_frames',
         'expr:gte(t,n_forced*2)',
         '-sc_threshold',
@@ -42,7 +32,6 @@ function args({ url, key, encode }: OutputSettings) {
         encode.bitrate,
         '-maxrate',
         encode.bitrate,
-        // Twice the bitrate, in the same unit
         '-bufsize',
         `${Number(encode.bitrate.slice(0, -1)) * 2}k`,
         ...(encode.resolution ? ['-s', encode.resolution] : []),
@@ -66,7 +55,7 @@ function args({ url, key, encode }: OutputSettings) {
   ];
 }
 
-/** Where the stream goes, each with which of OBS's streams it reads and its FFmpeg's arguments, in order. */
+/** Where the stream goes, in order */
 export const DESTINATIONS = OUTPUTS.map((output) => ({
   input: inputFor(output.input),
   args: args(output),
@@ -76,12 +65,12 @@ export const DESTINATIONS = OUTPUTS.map((output) => ({
     input: output.input,
   }),
   ffmpeg: undefined as ChildProcess | undefined,
-  /** Whether send() is looking after it, so it's never started twice */
+  /** Whether send() has it, so it's never started twice */
   running: false,
 }));
 export type Destination = (typeof DESTINATIONS)[number];
 
-/** An output waiting for a stream, as it was before it was sent one */
+/** An output waiting for a stream */
 export function idle({
   name,
   sends,
