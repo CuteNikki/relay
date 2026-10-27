@@ -1,4 +1,10 @@
-import { OUTPUTS, PASS, RTMP_SERVER, type InputName } from './config';
+import {
+  INPUT_NAMES,
+  OUTPUTS,
+  PASS,
+  RTMP_SERVER,
+  type InputName,
+} from './config';
 import { log, type Logger } from './log';
 
 /**
@@ -43,8 +49,8 @@ const LABELS: Record<InputName, string> = {
 };
 
 /** Only the streams some output wants: with no vertical output, there's no need to watch for one */
-const names = [...new Set(OUTPUTS.map((o) => o.input))].sort((a) =>
-  a === 'landscape' ? -1 : 1,
+const names = INPUT_NAMES.filter((name) =>
+  OUTPUTS.some((o) => o.input === name),
 );
 
 export const INPUTS: Input[] = names.map((name) => {

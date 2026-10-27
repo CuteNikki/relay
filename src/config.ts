@@ -175,7 +175,7 @@ export const OUTPUTS = outputs;
 
 // MediaMTX, which OBS streams to, and which takes a stream only with
 // INBOUND_STREAM_KEY as its password; the relay reads it back from there
-export const RTMP_SERVER = Bun.env.RTMP_SERVER ?? 'rtmp-server';
+export const RTMP_SERVER = setting('RTMP_SERVER') ?? 'rtmp-server';
 export const PASS = encodeURIComponent(INBOUND_KEY);
 hideInLogs(INBOUND_KEY, PASS, ...OUTPUTS.map((o) => o.key));
 
@@ -195,9 +195,9 @@ export const RETRY_MIN_MS = 2000;
 export const RETRY_MAX_MS = 30_000;
 export const STABLE_MS = 60_000;
 // How long a platform's FFmpeg can go without sending a frame before it's
-// taken as hung and stopped, to be started again. Longer than OBS can be
-// gone before MediaMTX gives up on it and plays the fallback: over SRT, that's
-// about 15 seconds.
+// taken as hung and stopped, to be started again. Well over the gap before
+// the fallback plays when OBS drops out: MediaMTX's 5 s readTimeout, plus a
+// couple of seconds of SRT's buffer.
 export const STALL_MS = 30_000;
 
 /** "90s", "5m" or "1h" in milliseconds */

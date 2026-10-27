@@ -116,7 +116,8 @@ export function relay(d: Destination) {
     if (key === 'frame') frames = number(value, frames);
     else if (key === 'total_size') bytes = number(value, bytes);
     else if (key === 'out_time_us') outTimeUs = number(value, outTimeUs);
-    else if (key === 'drop_frames') out.droppedFrames = Number(value);
+    else if (key === 'drop_frames')
+      out.droppedFrames = number(value, out.droppedFrames ?? 0);
     else if (key === 'progress') {
       const now = { frames, bytes, outTimeUs, at: Date.now() };
       if (!sample) sample = now;
@@ -164,13 +165,14 @@ export function relay(d: Destination) {
       // The first error of the last few seconds before it exited, which says
       // why, where the last says only that it gave up: "Connection refused"
       // rather than "Error opening output files"
-      const last = errors.at(-1)?.at ?? 0;
-      const said = errors.find((e) => e.at >= last - 5000)?.text;
-      const why = complaint ?? said;
+      const exitedAt = Date.now();
+      const said = errors.find((e) => e.at >= exitedAt - 5000)?.text;
+      const reason = complaint ?? said;
+      const why = reason && hide(reason);
       plog.debug(`FFmpeg exited with ${how}`);
-      if (code !== 0 && why) out.lastError = hide(why);
+      if (code !== 0 && why) out.lastError = why;
       d.ffmpeg = undefined;
-      resolve({ how, why: why && hide(why) });
+      resolve({ how, why });
     });
   });
 }
