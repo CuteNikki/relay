@@ -28,7 +28,7 @@ OBS ──RTMP or SRT──▶ MediaMTX ──▶ relay (FFmpeg) ──┬──
 - If one platform fails, say Twitch turns the key away or its server drops
   out, the others keep going. The relay tries that platform again after 2
   seconds, then waits twice as long each time it fails in a row, up to 30
-  seconds. One that sends no frames for 15 seconds counts as failed too,
+  seconds. One that sends no frames for 30 seconds counts as failed too,
   since FFmpeg can hang rather than give up when a server goes away.
 - Stream keys are hidden in everything it logs, since FFmpeg prints its full
   addresses.
