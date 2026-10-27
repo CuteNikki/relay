@@ -41,11 +41,17 @@ const seconds = (ms: number) =>
  */
 function end(input: Input, text: string) {
   reset(input);
-  for (const d of DESTINATIONS) {
-    if (d.input === input) d.ffmpeg?.kill('SIGINT');
+  for (const destination of DESTINATIONS) {
+    if (destination.input === input) destination.ffmpeg?.kill('SIGINT');
   }
   input.log.info(`${text} ${WAITING}`);
   writeStatus(true);
+}
+
+/** "Twitch (1080p at 6000 kb/s)", and which stream it gets once there are two */
+function describe({ out, input }: Destination) {
+  const which = INPUTS.length > 1 ? `, ${input.label.toLowerCase()}` : '';
+  return `${out.name} (${out.sends}${which})`;
 }
 
 /**
@@ -53,9 +59,7 @@ function end(input: Input, text: string) {
  * and while one is, sees that every platform that gets it is being sent it.
  */
 async function watch() {
-  log.info(
-    `📤 Sends to ${DESTINATIONS.map((d) => `${d.out.name} (${d.out.sends}${INPUTS.length > 1 ? `, ${d.input.label.toLowerCase()}` : ''})`).join(', ')}`,
-  );
+  log.info(`📤 Sends to ${DESTINATIONS.map(describe).join(', ')}`);
   log.info(`📡 ${WAITING}`);
   while (!stopping) {
     // Each on its own: one going is nothing to the other
@@ -86,8 +90,10 @@ async function look(input: Input) {
   // Every time, not only when it came in, so a platform whose FFmpeg gave
   // up as the stream went and came back quickly is started again
   if (input.live) {
-    for (const d of DESTINATIONS) {
-      if (d.input === input && !d.running) void send(d);
+    for (const destination of DESTINATIONS) {
+      if (destination.input === input && !destination.running) {
+        void send(destination);
+      }
     }
   }
 }
@@ -123,21 +129,21 @@ function gone(input: Input) {
  * its server dropping out, leaves the others going; FFmpeg is started again
  * by itself, waiting longer each time it fails in a row.
  */
-async function send(d: Destination) {
-  d.running = true;
+async function send(destination: Destination) {
+  destination.running = true;
   let delay = RETRY_MIN_MS;
-  while (d.input.live && !stopping) {
+  while (destination.input.live && !stopping) {
     const started = Date.now();
-    const { how, why } = await relay(d);
+    const { how, why } = await relay(destination);
     // Its input ending is the stream ending, not a failure. With the
     // fallback, its input never ends: the stream has ended when end() says.
-    if (stopping || !d.input.live) break;
-    if (!FALLBACK && !(await streamIsIn(d.input))) break;
+    if (stopping || !destination.input.live) break;
+    if (!FALLBACK && !(await streamIsIn(destination.input))) break;
     if (Date.now() - started > STABLE_MS) delay = RETRY_MIN_MS;
-    d.out.state = 'retrying';
-    d.out.retries++;
+    destination.out.state = 'retrying';
+    destination.out.retries++;
     log
-      .for(d.out.name)
+      .for(destination.out.name)
       .warn(
         `🔁 Failed (${why ?? `FFmpeg exited with ${how}`}), trying again in ${delay / 1000} s`,
       );
@@ -145,8 +151,8 @@ async function send(d: Destination) {
     await Bun.sleep(delay);
     delay = Math.min(delay * 2, RETRY_MAX_MS);
   }
-  d.out = idle(d.out);
-  d.running = false;
+  destination.out = idle(destination.out);
+  destination.running = false;
   writeStatus(true);
 }
 
@@ -158,7 +164,9 @@ async function stop(signal: string) {
   if (stopping) return;
   stopping = true;
   log.info(`🛑 ${signal}: stopping, letting FFmpeg end the streams...`);
-  const running = DESTINATIONS.flatMap((d) => d.ffmpeg ?? []);
+  const running = DESTINATIONS.flatMap(
+    (destination) => destination.ffmpeg ?? [],
+  );
   for (const ffmpeg of running) ffmpeg.kill('SIGINT');
   await Promise.race([
     Promise.all(running.map((ffmpeg) => once(ffmpeg, 'close'))),
@@ -172,7 +180,9 @@ async function stop(signal: string) {
   }
   // Offline, for the dashboard, rather than live until it goes stale
   for (const input of INPUTS) reset(input);
-  for (const d of DESTINATIONS) d.out = idle(d.out);
+  for (const destination of DESTINATIONS) {
+    destination.out = idle(destination.out);
+  }
   writeStatus(true);
   process.exit(0);
 }
@@ -186,7 +196,7 @@ function crash(error: unknown) {
   log.error(
     `💥 The relay crashed: ${error instanceof Error ? error.stack : error}`,
   );
-  for (const d of DESTINATIONS) d.ffmpeg?.kill('SIGKILL');
+  for (const destination of DESTINATIONS) destination.ffmpeg?.kill('SIGKILL');
   process.exit(1);
 }
 process.on('uncaughtException', crash);

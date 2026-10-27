@@ -84,12 +84,12 @@ export type Status = {
   updatedAt: number;
 };
 
-const inputStatus = (i: Input): InputStatus => ({
-  name: i.name,
-  live: i.live,
-  since: i.since,
-  media: i.media,
-  fallbackSince: i.fallbackSince,
+const inputStatus = (input: Input): InputStatus => ({
+  name: input.name,
+  live: input.live,
+  since: input.since,
+  media: input.media,
+  fallbackSince: input.fallbackSince,
 });
 
 let lastWrite = 0;

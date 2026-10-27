@@ -24,7 +24,7 @@ function describe({ encode }: OutputSettings) {
  * with its preset.
  */
 function args({ url, key, encode }: OutputSettings) {
-  const as = encode
+  const codecs = encode
     ? [
         '-c:v',
         'libx264',
@@ -57,7 +57,7 @@ function args({ url, key, encode }: OutputSettings) {
     '0:v:0',
     '-map',
     '0:a:0',
-    ...as,
+    ...codecs,
     '-flvflags',
     'no_duration_filesize',
     '-f',

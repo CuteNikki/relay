@@ -67,26 +67,30 @@ const repeats = new Map<
 >();
 
 function sayRepeats(key: string) {
-  const r = repeats.get(key);
-  if (r?.more) r.logger[r.level](`${r.text} (${r.more} more times since)`);
+  const repeat = repeats.get(key);
+  if (repeat?.more) {
+    repeat.logger[repeat.level](
+      `${repeat.text} (${repeat.more} more times since)`,
+    );
+  }
   repeats.delete(key);
 }
 
 /** For what FFmpeg says, which it can say over and over. */
 export function logRepeating(logger: Logger, level: Level, text: string) {
   const key = `${logger.platform ?? ''} ${text}`;
-  const r = repeats.get(key);
-  if (r && Date.now() - r.at < REPEAT_MS) {
-    r.more++;
+  const repeat = repeats.get(key);
+  if (repeat && Date.now() - repeat.at < REPEAT_MS) {
+    repeat.more++;
     return;
   }
-  if (r) sayRepeats(key);
+  if (repeat) sayRepeats(key);
   logger[level](text);
   repeats.set(key, { logger, level, text, at: Date.now(), more: 0 });
 }
 
 setInterval(() => {
-  for (const [key, r] of repeats) {
-    if (Date.now() - r.at >= REPEAT_MS) sayRepeats(key);
+  for (const [key, repeat] of repeats) {
+    if (Date.now() - repeat.at >= REPEAT_MS) sayRepeats(key);
   }
 }, 10_000).unref();

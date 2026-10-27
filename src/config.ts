@@ -38,19 +38,19 @@ export type OutputSettings = {
 // An empty setting, as KEY= in .env, is the same as none
 const setting = (name: string) => Bun.env[name] || undefined;
 
-function ingest(name: string, url: string) {
+function rtmpUrl(name: string, url: string) {
   if (!/^rtmps?:\/\/[^/]+/.test(url)) {
     fail(`${name} should be an rtmp:// or rtmps:// address, not ${url}`);
   }
   return url.replace(/\/+$/, '');
 }
-function resolution(name: string, value?: string) {
+function checkResolution(name: string, value?: string) {
   if (value && !/^\d+x\d+$/.test(value)) {
     fail(`${name} should be like 1920x1080, not ${value}`);
   }
   return value;
 }
-function bitrate(name: string, value?: string) {
+function checkBitrate(name: string, value?: string) {
   if (value && !/^\d+k$/.test(value)) {
     fail(`${name} should be like 6000k, not ${value}`);
   }
@@ -69,7 +69,7 @@ export const PRESETS = [
   'slower',
   'veryslow',
 ];
-function preset(name: string, value?: string) {
+function checkPreset(name: string, value?: string) {
   if (value && !PRESETS.includes(value)) {
     fail(`${name} should be one of ${PRESETS.join(', ')}, not ${value}`);
   }
@@ -79,7 +79,7 @@ function preset(name: string, value?: string) {
 // YouTube and Twitch had settings of their own before they were outputs
 // like any other. An .env from then would otherwise only say there's
 // nowhere to send the stream, without saying why.
-const OLD = [
+const REMOVED_SETTINGS = [
   'YOUTUBE_STREAM_KEY',
   'YOUTUBE_INGEST',
   'TWITCH_STREAM_KEY',
@@ -87,9 +87,9 @@ const OLD = [
   'TWITCH_RESOLUTION',
   'TWITCH_BITRATE',
 ].filter((name) => setting(name));
-if (OLD.length) {
+if (REMOVED_SETTINGS.length) {
   fail(
-    `${OLD.join(', ')} ${OLD.length > 1 ? 'are' : 'is'} no longer used: YouTube and Twitch are outputs like any other now, as OUTPUT_1_URL, OUTPUT_1_KEY and so on. See "Where it sends" in the README, and .env.example`,
+    `${REMOVED_SETTINGS.join(', ')} ${REMOVED_SETTINGS.length > 1 ? 'are' : 'is'} no longer used: YouTube and Twitch are outputs like any other now, as OUTPUT_1_URL, OUTPUT_1_KEY and so on. See "Where it sends" in the README, and .env.example`,
   );
 }
 
@@ -97,7 +97,7 @@ const outputs: OutputSettings[] = [];
 
 // Where it sends, as OUTPUT_1_URL, OUTPUT_1_KEY and so on, numbered however
 // suits, in the order of their numbers
-const PARTS = [
+const OUTPUT_FIELDS = [
   'NAME',
   'URL',
   'KEY',
@@ -108,53 +108,52 @@ const PARTS = [
 ];
 const numbers = new Set<number>();
 for (const name of Object.keys(Bun.env)) {
-  const [, n, part] = name.match(/^OUTPUT_(\d+)_(.+)$/) ?? [];
-  if (!n || !part) continue;
-  // A misspelt part would otherwise be left out without a word
-  if (!PARTS.includes(part)) {
-    fail(`${name} isn't a setting: an output has ${PARTS.join(', ')}`);
+  const [, number, field] = name.match(/^OUTPUT_(\d+)_(.+)$/) ?? [];
+  if (!number || !field) continue;
+  // A misspelt field would otherwise be left out without a word
+  if (!OUTPUT_FIELDS.includes(field)) {
+    fail(`${name} isn't a setting: an output has ${OUTPUT_FIELDS.join(', ')}`);
   }
-  numbers.add(Number(n));
+  numbers.add(Number(number));
 }
-for (const n of [...numbers].sort((a, b) => a - b)) {
-  const part = (name: string) => setting(`OUTPUT_${n}_${name}`);
-  const url = part('URL');
+for (const number of [...numbers].sort((a, b) => a - b)) {
+  const prefix = `OUTPUT_${number}_`;
+  const get = (field: string) => setting(prefix + field);
+  const url = get('URL');
   if (!url) {
-    if (PARTS.some(part)) {
-      fail(`Set OUTPUT_${n}_URL in .env: it says where output ${n} goes`);
+    if (OUTPUT_FIELDS.some((field) => get(field))) {
+      fail(`Set ${prefix}URL in .env: it says where output ${number} goes`);
     }
     continue;
   }
-  const name = part('NAME') ?? `Output ${n}`;
-  const address = ingest(`OUTPUT_${n}_URL`, url);
-  const size = resolution(`OUTPUT_${n}_RESOLUTION`, part('RESOLUTION'));
-  const rate = bitrate(`OUTPUT_${n}_BITRATE`, part('BITRATE'));
-  const speed = preset(`OUTPUT_${n}_PRESET`, part('PRESET'));
-  const input = part('INPUT') ?? 'landscape';
+  const name = get('NAME') ?? `Output ${number}`;
+  const rtmpAddress = rtmpUrl(`${prefix}URL`, url);
+  const resolution = checkResolution(`${prefix}RESOLUTION`, get('RESOLUTION'));
+  const bitrate = checkBitrate(`${prefix}BITRATE`, get('BITRATE'));
+  const preset = checkPreset(`${prefix}PRESET`, get('PRESET'));
+  const input = get('INPUT') ?? 'landscape';
   if (!INPUT_NAMES.includes(input as InputName)) {
-    fail(
-      `OUTPUT_${n}_INPUT should be ${INPUT_NAMES.join(' or ')}, not ${input}`,
-    );
+    fail(`${prefix}INPUT should be ${INPUT_NAMES.join(' or ')}, not ${input}`);
   }
   // Left out until it has a key, as a platform in .env.example is that's
   // not been filled in
-  const key = part('KEY');
+  const key = get('KEY');
   if (!key) {
-    log.info(`⏭️ ${name} has no OUTPUT_${n}_KEY, so it's left out`);
+    log.info(`⏭️ ${name} has no ${prefix}KEY, so it's left out`);
     continue;
   }
   outputs.push({
     name,
-    url: address,
+    url: rtmpAddress,
     key,
     input: input as InputName,
     // Re-encoded if any of them is set, at 6000 kb/s and superfast unless said
     encode:
-      size || rate || speed
+      resolution || bitrate || preset
         ? {
-            resolution: size,
-            bitrate: rate ?? '6000k',
-            preset: speed ?? 'superfast',
+            resolution,
+            bitrate: bitrate ?? '6000k',
+            preset: preset ?? 'superfast',
           }
         : undefined,
   });

@@ -33,9 +33,9 @@ function describeAudio(line: string) {
 }
 
 /** Runs one platform's FFmpeg until it exits, and says how and why. */
-export function relay(d: Destination) {
-  const { out } = d;
-  const plog = log.for(out.name);
+export function relay(destination: Destination) {
+  const { out } = destination;
+  const platformLog = log.for(out.name);
   Object.assign(out, {
     state: 'connecting',
     since: undefined,
@@ -58,10 +58,10 @@ export function relay(d: Destination) {
     '-progress',
     'pipe:1',
     '-i',
-    d.input.url,
-    ...d.args,
+    destination.input.url,
+    ...destination.args,
   ]);
-  d.ffmpeg = ffmpeg;
+  destination.ffmpeg = ffmpeg;
 
   // What it says about the stream: the input's streams come under
   // "Input #0", the outputs' under "Output #…"
@@ -74,15 +74,15 @@ export function relay(d: Destination) {
     // anyone in particular, how much it matters, and what
     const [, who = '', level = 'info', text = line] =
       line.match(/^(\[[^\]]+ @ [^\]]+\] )?\[(\w+)\] (.*)$/) ?? [];
-    logRepeating(plog, FFMPEG_LEVELS[level] ?? 'debug', `${who}${text}`);
+    logRepeating(platformLog, FFMPEG_LEVELS[level] ?? 'debug', `${who}${text}`);
     if (/^Input #0/.test(text)) {
       section = 'input';
     } else if (/^Output #/.test(text)) {
       section = 'output';
     } else if (section === 'input' && /Stream #.*: Video:/.test(text)) {
-      d.input.media.video = describeVideo(text);
+      destination.input.media.video = describeVideo(text);
     } else if (section === 'input' && /Stream #.*: Audio:/.test(text)) {
-      d.input.media.audio = describeAudio(text);
+      destination.input.media.audio = describeAudio(text);
     }
     if (level === 'error' || level === 'fatal' || level === 'panic') {
       errors = [...errors.slice(-19), { at: Date.now(), text: text.trim() }];
@@ -92,7 +92,7 @@ export function relay(d: Destination) {
   // FFmpeg not there to start, or no room to start it: 'close' comes after
   ffmpeg.on('error', (error) => {
     complaint = `FFmpeg couldn't be started: ${error.message}`;
-    plog.error(`❌ ${complaint}`);
+    platformLog.error(`❌ ${complaint}`);
   });
 
   // FFmpeg's own fps, bitrate and speed are averages since it started, which
@@ -136,7 +136,7 @@ export function relay(d: Destination) {
         out.state = 'live';
         out.since = Date.now();
         delete out.lastError;
-        plog.info('✅ Sending');
+        platformLog.info('✅ Sending');
         writeStatus(true);
       } else writeStatus();
     }
@@ -151,7 +151,7 @@ export function relay(d: Destination) {
     if (frames > lastFrame.frames) lastFrame = { frames, at: Date.now() };
     else if (Date.now() - lastFrame.at > STALL_MS) {
       complaint = `Sent no frames for ${STALL_MS / 1000} s`;
-      plog.warn(`⏱️ ${complaint}, stopping its FFmpeg`);
+      platformLog.warn(`⏱️ ${complaint}, stopping its FFmpeg`);
       ffmpeg.kill('SIGKILL');
       clearInterval(watchdog);
     }
@@ -169,9 +169,9 @@ export function relay(d: Destination) {
       const said = errors.find((e) => e.at >= exitedAt - 5000)?.text;
       const reason = complaint ?? said;
       const why = reason && hide(reason);
-      plog.debug(`FFmpeg exited with ${how}`);
+      platformLog.debug(`FFmpeg exited with ${how}`);
       if (code !== 0 && why) out.lastError = why;
-      d.ffmpeg = undefined;
+      destination.ffmpeg = undefined;
       resolve({ how, why });
     });
   });
