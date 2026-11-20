@@ -179,6 +179,11 @@ hideInLogs(INBOUND_KEY, PASS, ...OUTPUTS.map((o) => o.key));
 export const STATUS_FILE = setting('STATUS_FILE') ?? '/tmp/relay/status.json';
 // At most this often while live
 export const STATUS_EVERY_MS = 2000;
+// The status over HTTP too, for a dashboard on another machine, once a token
+// to read it with is set: see src/server.ts
+export const STATUS_TOKEN = setting('STATUS_TOKEN');
+export const STATUS_PORT = Number(setting('STATUS_PORT') ?? 8080);
+hideInLogs(STATUS_TOKEN);
 // How often MediaMTX is asked about each stream: often enough to tell OBS
 // stopping from dropping out (see DROPPED_MS in index.ts)
 export const WAIT_MS = 250;

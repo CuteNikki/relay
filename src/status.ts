@@ -69,6 +69,10 @@ const inputStatus = (input: Input): InputStatus => ({
   fallbackSince: input.fallbackSince,
 });
 
+let current: Status | undefined;
+/** The status as last written, for src/server.ts to serve. */
+export const currentStatus = () => current;
+
 let lastWrite = 0;
 // So a status that can't be written is said once, and once more when it can
 let failing = false;
@@ -91,6 +95,7 @@ export function writeStatus(force = false) {
     problems: [mediamtxProblem()].filter((p): p is string => !!p),
     updatedAt: now,
   };
+  current = status;
   try {
     mkdirSync(dirname(STATUS_FILE), { recursive: true });
     writeFileSync(`${STATUS_FILE}.tmp`, JSON.stringify(status));

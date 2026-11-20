@@ -119,6 +119,8 @@ All in `.env`:
 | `INBOUND_STREAM_KEY`     | (required)                   | The password OBS streams with                                                     |
 | `OUTPUT_n_…`             |                              | Where it sends (see [Where it sends](#where-it-sends))                            |
 | `STATUS_FILE`            | `/tmp/relay/status.json`     | Where it writes whether it's live (see below)                                     |
+| `STATUS_TOKEN`           | (none)                       | Serves the status over HTTP too, to requests with this token (see below)          |
+| `STATUS_PORT`            | `8080`                       | The port it serves the status on                                                  |
 | `LOG_LEVEL`              | `info`                       | How much it logs: `debug` (everything FFmpeg says too), `info`, `warn` or `error` |
 | `SRT_PASSPHRASE`         | (none)                       | Encrypts what OBS sends by SRT: 10 to 79 characters, or MediaMTX won't start      |
 | `FALLBACK`               | `false`                      | `true` shows a clip while OBS has dropped out (see below)                         |
@@ -368,6 +370,19 @@ A dashboard can read the file with
 `docker exec rtmp-relay cat /tmp/relay/status.json`. The compose file labels
 the container `dash.app: relay` for [dash](https://github.com/CuteNikki/dash),
 which shows this on its tile.
+
+A dashboard on another machine can't read the file, so with `STATUS_TOKEN`
+set, the relay also serves it over HTTP on `STATUS_PORT`:
+
+- `GET /status` answers the status, as the file has it, to a request with
+  `Authorization: Bearer <STATUS_TOKEN>`, and 401 to any other.
+- `GET /` answers `200 Healthy` or `503 Unhealthy`, by the same rules as the
+  health check below, and nothing more, for an uptime check without the token.
+
+The compose file publishes no port for it: put it behind a reverse proxy with
+HTTPS, as the token would otherwise cross the internet readable. For dash,
+add the proxy's address as a website and set `RELAY_STATUS_URL` and
+`RELAY_STATUS_TOKEN` in its `.env`.
 
 Docker checks the relay's health from the same file: `docker ps` shows it as
 `unhealthy` if the file stops being written, which means the relay has hung,

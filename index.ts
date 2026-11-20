@@ -14,6 +14,7 @@ import { relay } from './src/ffmpeg';
 import { INPUTS, reset, type Input } from './src/inputs';
 import { log } from './src/log';
 import { streamIsIn } from './src/mediamtx';
+import { serveStatus } from './src/server';
 import { writeStatus } from './src/status';
 
 let stopping = false;
@@ -189,4 +190,5 @@ process.on('uncaughtException', crash);
 process.on('unhandledRejection', crash);
 
 if (FALLBACK) checkFallbackClips();
+serveStatus();
 void watch();
